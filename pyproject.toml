@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# The repository is ANYio, but `anyio` on PyPI is the async compatibility
+# library (a transitive dependency of httpx and starlette).  A top-level import
+# package by that name would shadow it, so the distribution and import package
+# are `ANYfileio`/`anyfileio`.
+name = "ANYfileio"
+version = "0.1.0"
+description = "Reading and writing structural finite-element interchange files: SESAM FEM/SIF and CalculiX INP/FRD/DAT"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [
+  { name = "Audun Arnesen Nyhus", email = "audunarn@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering",
+]
+# The semantic layer hands back an ANYmesher mesh and ANYmaterial specifications,
+# and the deck writer reads material compliance through ANYmaterial.  The record
+# and document layers need neither, and stay importable without them being used.
+dependencies = [
+  "numpy>=1.26",
+  "ANYmesher>=0.1.0",
+  "ANYmaterial>=0.1.0",
+]
+
+[project.optional-dependencies]
+# The file inspector uses tkinter from the standard library, so it adds no
+# wheel.  The extra exists so `pip install ANYfileio[gui]` is meaningful and
+# stays meaningful if that ever stops being true.
+gui = []
+dev = [
+  "build>=1.2",
+  "pytest>=8",
+  "twine>=5",
+]
+
+[project.scripts]
+anyfileio = "anyfileio.__main__:main"
+
+# A GUI entry point so no console window opens alongside the inspector.
+[project.gui-scripts]
+anyfileio-gui = "anyfileio.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/audunarn/ANYio"
+Repository = "https://github.com/audunarn/ANYio"
+Issues = "https://github.com/audunarn/ANYio/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["anyfileio*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["src"]
+# A repository-local basetemp, because the user temp directory is not always
+# writable by the test process on Windows.  Gitignored, and pytest prunes it.
+addopts = ["-ra", "-p", "no:cacheprovider", "--basetemp=.pytest_tmp"]
