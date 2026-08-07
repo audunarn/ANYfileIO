@@ -34,7 +34,7 @@ from .sesam.semantics import read_sesam_semantics
 from .sesam.sif import read_sesam_sif_stress
 from .sesam.validation import validate_sesam_fem_document
 
-__all__ = ["InspectorWindow", "main"]
+__all__ = ["InspectorWindow", "open_inspector", "main"]
 
 _SEVERITY_COLOURS = {"error": "#a00000", "warning": "#8a5a00", "info": "#404040"}
 
@@ -422,6 +422,24 @@ class InspectorWindow(ttk.Frame):
             "Canonicalized",
             f"wrote {report.records_written} records ({report.bytes_written} bytes) to {report.path}",
         )
+
+
+def open_inspector(
+    master: tk.Misc,
+    path: Optional[str | Path] = None,
+    *,
+    title: str = "ANYfileio",
+) -> tuple[tk.Toplevel, InspectorWindow]:
+    """Open an embeddable inspector, optionally with ``path`` loaded."""
+
+    window = tk.Toplevel(master)
+    window.title(title)
+    window.minsize(860, 700)
+    inspector = InspectorWindow(window)
+    inspector.pack(fill="both", expand=True)
+    if path is not None:
+        inspector.load(path)
+    return window, inspector
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

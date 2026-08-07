@@ -31,8 +31,8 @@ classifiers = [
 # and document layers need neither, and stay importable without them being used.
 dependencies = [
   "numpy>=1.26",
-  "ANYmesher>=0.1.0",
-  "ANYmaterial>=0.1.0",
+  "ANYmesher>=0.1,<0.2",
+  "ANYmaterial>=0.1,<0.2",
 ]
 
 [project.optional-dependencies]

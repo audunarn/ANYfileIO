@@ -190,6 +190,18 @@ def _node_block(mesh: Mesh) -> List[str]:
     return lines
 
 
+def _set_block(kind: str, name: str, identifiers: Sequence[int]) -> List[str]:
+    """Write a deterministic node or element set in CalculiX-sized chunks."""
+
+    values = sorted({int(identifier) for identifier in identifiers})
+    if not values:
+        return []
+    lines = [f"*{kind}, {kind}={name}"]
+    for start in range(0, len(values), _PER_LINE):
+        lines.append(", ".join(str(value) for value in values[start : start + _PER_LINE]))
+    return lines
+
+
 def _element_blocks(model: DeckModel) -> Tuple[List[str], Dict[Tuple[str, str], List[int]]]:
     mesh = model.mesh
     connectivity = {**mesh.quads, **mesh.tris, **mesh.beams}
@@ -388,16 +400,24 @@ def write_deck(
     path: str | Path,
     *,
     analysis: str = "static",
+    num_modes: int = 5,
     metadata: Optional[Mapping[str, Any]] = None,
     overwrite: bool = False,
 ) -> DeckReport:
     """Write a CalculiX input deck, and report what it approximated."""
 
+    if analysis == "buckling":
+        # The solver family has historically called this analysis "buckling";
+        # CalculiX calls the keyword BUCKLE.  Accept both spellings at the API.
+        analysis = "buckle"
     if analysis not in {"static", "frequency", "buckle"}:
         raise CalculixError(
-            f"unsupported analysis {analysis!r}; expected 'static', 'frequency' or 'buckle'",
+            f"unsupported analysis {analysis!r}; expected 'static', 'frequency', "
+            "'buckle' or 'buckling'",
             code="CCX100",
         )
+    if analysis in {"frequency", "buckle"} and int(num_modes) < 1:
+        raise CalculixError("num_modes must be at least 1", code="CCX100")
     destination = Path(path)
     if not destination.suffix:
         destination = destination.with_suffix(".inp")
@@ -417,7 +437,16 @@ def write_deck(
     for key, value in sorted(dict(metadata or {}).items()):
         lines.append(f"** {key}: {value}")
     lines.extend(_node_block(model.mesh))
+    all_node_ids = sorted(model.mesh.nodes)
+    lines.extend(_set_block("NSET", "NALL", all_node_ids))
+    support_node_ids = sorted({int(support.node_id) for support in model.supports})
+    lines.extend(_set_block("NSET", "SUPPORT", support_node_ids))
+    reaction_set = "SUPPORT" if support_node_ids else "NALL"
     lines.extend(element_lines)
+    all_element_ids = sorted(
+        set(model.mesh.quads) | set(model.mesh.tris) | set(model.mesh.beams)
+    )
+    lines.extend(_set_block("ELSET", "ALL", all_element_ids))
     lines.extend(_material_block(model.materials))
     lines.extend(section_lines)
     lines.extend(_boundary_block(model))
@@ -426,11 +455,21 @@ def write_deck(
     if analysis == "static":
         lines.append("*STATIC")
     elif analysis == "frequency":
-        lines.extend(["*FREQUENCY", "10"])
+        lines.extend(["*FREQUENCY", str(int(num_modes))])
     else:
-        lines.extend(["*BUCKLE", "5"])
+        lines.extend(["*BUCKLE", str(int(num_modes))])
     lines.extend(load_lines)
-    lines.extend(["*NODE FILE", "U, RF", "*EL FILE", "S", "*END STEP"])
+    lines.extend(
+        [
+            "*NODE FILE",
+            "U, RF",
+            "*EL FILE",
+            "S",
+            f"*NODE PRINT, NSET={reaction_set}, TOTALS=ONLY",
+            "RF",
+            "*END STEP",
+        ]
+    )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("\n".join(lines) + "\n", encoding="utf-8")

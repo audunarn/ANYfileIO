@@ -49,7 +49,7 @@ The permanent parity gate lives in ANYsolver, because ANYfileio cannot import it
 
 ## Deliberate behavioural differences
 
-All need confirming when ANYsolver is stripped:
+All were reviewed during the coordinated strip:
 
 - **Materials become ANYmaterial `MaterialSpec` records.** The solver's
   `_add_materials` called `model.add_material` directly and substituted defaults
@@ -105,15 +105,15 @@ All need confirming when ANYsolver is stripped:
 
 ## Note on a private import
 
-`ANYstructure/anystruct/fe_plate_fields.py` imports `_beam_section` from
-`anysolver.sesam_fem.importer`. It becomes public API in
-`anyfileio.sesam.semantics`, since a cross-repository consumer of a private name
-is a naming bug rather than a dependency to preserve.
+At extraction time, `ANYstructure/anystruct/fe_plate_fields.py` imported
+`_beam_section` from `anysolver.sesam_fem.importer`. The consumer now uses the
+public `anyfileio.sesam.semantics.beam_section` API.
 
 ## Import changes
 
-Applied when ANYsolver is stripped, not before. Until then ANYsolver keeps its
-own copies and remains the authority.
+Applied in ANYsolver 0.2. ANYfileio is now authoritative for interchange syntax
+and parsing; ANYsolver retains solver-specific adapters and compatibility
+facades.
 
 | Previous import | Replacement |
 | --- | --- |

@@ -205,6 +205,18 @@ def test_loading_a_second_file_clears_the_first(inspector, root, fem_file, tmp_p
     assert inspector.diagnostics == ()
 
 
+def test_open_inspector_helper_embeds_and_preloads_a_file(root, fem_file) -> None:
+    from anyfileio.gui import open_inspector
+
+    window, embedded = open_inspector(root, fem_file, title="Host inspector")
+    root.update()
+
+    assert window.title() == "Host inspector"
+    assert embedded.summary["nodes"] == 4
+    window.destroy()
+    root.update()
+
+
 def test_the_window_tears_down_cleanly(root) -> None:
     # Widget attributes that collide with tkinter's own internals only fail on
     # destroy, and only sometimes, so the teardown path is asserted directly.

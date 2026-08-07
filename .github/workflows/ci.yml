@@ -50,7 +50,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install ${{ env.SIBLINGS }}
       - run: python -m pip install -e ".[dev]" anyio
-      - run: python -c "import anyio, anyfileio; print(anyio.__version__, anyfileio.__version__)"
+      - run: python -c "import anyio, anyfileio; from importlib.metadata import version; print(version('anyio'), anyfileio.__version__)"
       - run: python -c "import anyio; assert 'anyfileio' not in anyio.__file__"
       - run: python -m pytest
 

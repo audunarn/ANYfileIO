@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Added:
+
+- **Embeddable inspection.** `open_inspector` opens the file inspector in a
+  host application's existing Tk event loop.
+- **Verification-safe CalculiX decks.** The neutral writer now defines the
+  `NALL`, `SUPPORT`, and `ALL` sets, requests reaction totals, accepts both
+  `buckle` and `buckling`, and exposes a configurable mode count defaulting to
+  five.
+- `export_sesam_fem` is available from the public SESAM and package facades.
+
 ## 0.1.0
 
 First feature release. The format code is extracted from ANYsolver; see
@@ -47,9 +59,8 @@ Changed from the source:
   previously attached to solver elements as `sesam_local_axes` and
   `sesam_transform_ids`.
 - **`_beam_section` is now public** as `anyfileio.sesam.semantics.beam_section`.
-  `ANYstructure/anystruct/fe_plate_fields.py` imports the private name today; a
-  cross-repository consumer of a private name is a naming bug, not a dependency
-  to preserve.
+  ANYstructure now consumes that public name instead of the former private
+  ANYsolver helper.
 - **A shared `FileFormatError` base**, with `SesamFemError` and a new
   `CalculixError` deriving from it. `SesamFemError` keeps its name and behaviour.
 - **Materials become `MaterialSpec` records, not solver materials.** A material

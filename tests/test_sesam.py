@@ -7,12 +7,17 @@ import pytest
 
 from anyfileio import (
     SesamFemError,
+    export_sesam_fem,
     read_raw_records,
     read_sesam_fem_document,
     read_sesam_semantics,
     read_sesam_sif_stress,
     write_sesam_fem_document,
 )
+
+
+def test_compatibility_export_is_public() -> None:
+    assert callable(export_sesam_fem)
 
 
 def _work_dir() -> Path:

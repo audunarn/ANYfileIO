@@ -221,6 +221,10 @@ def test_writing_a_plate_deck_produces_readable_calculix(tmp_path) -> None:
     assert "*BOUNDARY" in text
     assert "*DLOAD" in text
     assert "*STATIC" in text
+    assert "*NSET, NSET=NALL" in text
+    assert "*NSET, NSET=SUPPORT" in text
+    assert "*ELSET, ELSET=ALL" in text
+    assert "*NODE PRINT, NSET=SUPPORT, TOTALS=ONLY" in text
     assert text.rstrip().endswith("*END STEP")
 
     assert report.nodes == 9
@@ -329,6 +333,7 @@ def test_gravity_is_written_as_a_magnitude_and_a_direction(tmp_path) -> None:
     write_deck(model, tmp_path / "grav.inp")
 
     text = (tmp_path / "grav.inp").read_text(encoding="utf-8")
+    assert "*ELSET, ELSET=ALL" in text
     assert "ALL, GRAV, 9.81" in text
     assert ", -1," in text or "-1" in text
 
@@ -338,6 +343,21 @@ def test_every_analysis_type_writes_its_own_step(tmp_path, analysis: str, keywor
     write_deck(_plate_deck_model(), tmp_path / f"{analysis}.inp", analysis=analysis)
 
     assert keyword in (tmp_path / f"{analysis}.inp").read_text(encoding="utf-8")
+
+
+def test_solver_family_buckling_spelling_and_mode_count_are_preserved(tmp_path) -> None:
+    path = tmp_path / "buckling.inp"
+    write_deck(_plate_deck_model(), path, analysis="buckling", num_modes=7)
+
+    text = path.read_text(encoding="utf-8")
+    assert "*BUCKLE\n7\n" in text
+
+
+def test_reaction_totals_fall_back_to_all_nodes_without_supports(tmp_path) -> None:
+    path = tmp_path / "free.inp"
+    write_deck(_plate_deck_model(supports=[]), path)
+
+    assert "*NODE PRINT, NSET=NALL, TOTALS=ONLY" in path.read_text(encoding="utf-8")
 
 
 def test_the_writer_refuses_what_it_cannot_represent(tmp_path) -> None:

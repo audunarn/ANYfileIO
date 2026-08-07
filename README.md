@@ -4,9 +4,9 @@ Reading and writing structural finite-element interchange files: SESAM formatted
 FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`,
 `.dat`), with a tkinter inspector and a command-line interface.
 
-```powershell
-python -m pip install ANYfileio
-```
+After compatible ANYmaterial and ANYmesher releases are available on the same
+package index, install with `python -m pip install ANYfileio`. Until then, use
+the sibling-source development setup below.
 
 The repository is `ANYio`, but `anyio` on PyPI is the well-known async
 compatibility library — a transitive dependency of httpx and starlette — and a
@@ -71,6 +71,15 @@ works as a check in a build.
 diagnostics coloured by severity, an element-type histogram, and buttons to save
 a report or write a canonical copy.
 
+An existing Tk application can open that same inspector without starting a
+second event loop:
+
+```python
+from anyfileio.gui import open_inspector
+
+window, inspector = open_inspector(root, selected_path)
+```
+
 ## Diagnostics are data
 
 Strict reading raises on the first error. Lenient reading collects
@@ -123,6 +132,21 @@ to know the file was not already SI.
 ## Development
 
 ```powershell
+python -m pip install --no-deps -e C:\Github\ANYmaterial
+python -m pip install --no-deps -e C:\Github\ANYmesh
 python -m pip install -e "C:\Github\ANYio[dev]"
 python -m pytest
+```
+
+For both TestPyPI and PyPI, publish `ANYmaterial` and `ANYmesher` before
+`ANYfileio`. The publish workflow enforces that both compatible 0.1.x
+dependencies already resolve on the selected index.
+
+To open the inspector straight from a checkout — including an IDE's Run button —
+run [`run_gui.py`](run_gui.py) at the repository root, optionally with a file to
+open. It also picks up side-by-side `ANYmesh` and `ANYmaterial` checkouts, so the
+family works together with nothing installed.
+
+```bash
+python run_gui.py model.FEM
 ```

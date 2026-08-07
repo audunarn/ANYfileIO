@@ -32,7 +32,7 @@ from .document import (
     parse_sesam_fem_records,
     read_sesam_fem_document,
 )
-from .exporter import SesamFemExportReport, write_sesam_fem_document
+from .exporter import SesamFemExportReport, export_sesam_fem, write_sesam_fem_document
 from .records import FemRawRecord, read_raw_records, records_to_text, strict_int
 from .schema import SESAM_ELEMENT_REGISTRY, SesamElementSpec, classify_record, get_element_spec
 from .semantics import (
@@ -73,6 +73,7 @@ __all__ = [
     "beam_orientation",
     "beam_section",
     "classify_record",
+    "export_sesam_fem",
     "get_element_spec",
     "material_name",
     "parse_sesam_fem_records",
