@@ -8,7 +8,7 @@ After compatible ANYmaterial and ANYmesher releases are available on the same
 package index, install with `python -m pip install ANYfileio`. Until then, use
 the sibling-source development setup below.
 
-The repository is `ANYio`, but `anyio` on PyPI is the well-known async
+The repository is `ANYfileIO`, but `anyio` on PyPI is the well-known async
 compatibility library — a transitive dependency of httpx and starlette — and a
 top-level import package by that name would shadow it. The distribution is
 therefore **`ANYfileio`** and the import package is **`anyfileio`**.
@@ -134,7 +134,7 @@ to know the file was not already SI.
 ```powershell
 python -m pip install --no-deps -e C:\Github\ANYmaterial
 python -m pip install --no-deps -e C:\Github\ANYmesh
-python -m pip install -e "C:\Github\ANYio[dev]"
+python -m pip install -e "C:\Github\ANYfileIO[dev]"
 python -m pytest
 ```
 

@@ -41,7 +41,7 @@ def test_version_matches_pyproject() -> None:
 
 
 def test_distribution_name_does_not_collide_with_the_async_library() -> None:
-    # The repository is ANYio.  `anyio` on PyPI is the async compatibility
+    # The repository is ANYfileIO.  `anyio` on PyPI is the async compatibility
     # library, and an import package by that name would shadow it for every
     # environment that has httpx or starlette installed.  Asserted rather than
     # assumed, because a rename back to the repository name would be an easy
@@ -49,6 +49,14 @@ def test_distribution_name_does_not_collide_with_the_async_library() -> None:
     assert _pyproject()["project"]["name"] == "ANYfileio"
     assert (REPOSITORY_ROOT / "src" / "anyfileio").is_dir()
     assert not (REPOSITORY_ROOT / "src" / "anyio").exists()
+
+
+def test_project_urls_use_canonical_repository() -> None:
+    assert _pyproject()["project"]["urls"] == {
+        "Homepage": "https://github.com/audunarn/ANYfileIO",
+        "Repository": "https://github.com/audunarn/ANYfileIO",
+        "Issues": "https://github.com/audunarn/ANYfileIO/issues",
+    }
 
 
 def test_allowed_third_party_imports_are_declared_dependencies() -> None:

@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# The repository is ANYio, but `anyio` on PyPI is the async compatibility
+# The repository is ANYfileIO, but `anyio` on PyPI is the async compatibility
 # library (a transitive dependency of httpx and starlette).  A top-level import
 # package by that name would shadow it, so the distribution and import package
 # are `ANYfileio`/`anyfileio`.
@@ -54,9 +54,9 @@ anyfileio = "anyfileio.__main__:main"
 anyfileio-gui = "anyfileio.gui:main"
 
 [project.urls]
-Homepage = "https://github.com/audunarn/ANYio"
-Repository = "https://github.com/audunarn/ANYio"
-Issues = "https://github.com/audunarn/ANYio/issues"
+Homepage = "https://github.com/audunarn/ANYfileIO"
+Repository = "https://github.com/audunarn/ANYfileIO"
+Issues = "https://github.com/audunarn/ANYfileIO/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
