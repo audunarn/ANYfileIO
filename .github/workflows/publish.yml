@@ -13,12 +13,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Require compatible material and mesher packages
+      - name: Require compatible semantics-extra material and mesher packages
         env:
           TARGET_INDEX_URL: ${{ github.event_name == 'release' && 'https://pypi.org/simple' || 'https://test.pypi.org/simple' }}
         run: |
           python -m pip install --upgrade pip
-          python -m pip download --no-deps --dest sibling-distributions --index-url "$TARGET_INDEX_URL" "ANYmaterial>=0.1,<0.2" "ANYmesher>=0.1,<0.2"
+          python -m pip download --no-deps --dest sibling-distributions --index-url "$TARGET_INDEX_URL" "ANYmaterial>=0.1,<0.2" "ANYmesher>=0.2,<0.3"
 
   build:
     needs: dependency-gate

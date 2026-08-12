@@ -4,6 +4,15 @@
 
 Added:
 
+- **NumPy-only 0.2 base.** Records, documents, built-in formats, the inspector,
+  CLI, and accepted CAD-neutral records/discovery import without ANYmesher or
+  ANYmaterial. Those accepted CAD exports remain available from the package
+  facade.
+- **Optional semantic runtime.** `ANYfileio[semantics]` carries exact
+  ANYmesher 0.2.x and ANYmaterial 0.1.x ranges. SESAM semantic materialization
+  and CalculiX deck writing load them on demand and report typed `SEM001`,
+  `SEM002`, or `SEM003` failures with the install hint when unavailable or
+  incompatible.
 - **Embeddable inspection.** `open_inspector` opens the file inspector in a
   host application's existing Tk event loop.
 - **Verification-safe CalculiX decks.** The neutral writer now defines the

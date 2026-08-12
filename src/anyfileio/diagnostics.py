@@ -28,6 +28,7 @@ __all__ = [
     "CalculixError",
     "FemDiagnostic",
     "FileFormatError",
+    "SemanticDependencyError",
     "SesamFemError",
     "has_errors",
     "raise_if_errors",
@@ -88,6 +89,10 @@ class SesamFemError(FileFormatError):
 
 class CalculixError(FileFormatError):
     """Raised when a CalculiX deck or result file cannot be read or written."""
+
+
+class SemanticDependencyError(FileFormatError):
+    """Raised when the optional semantics runtime cannot be loaded."""
 
 
 def has_errors(diagnostics: Iterable[FemDiagnostic]) -> bool:

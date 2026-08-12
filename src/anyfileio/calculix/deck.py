@@ -22,13 +22,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
-from anymaterial import elastic_compliance_matrix, material_symmetry
-from anymesher import Mesh
+if TYPE_CHECKING:
+    from anymesher import Mesh
 
+from .._semantic_dependencies import require_semantics
 from ..diagnostics import CalculixError
 
 __all__ = ["DeckModel", "DeckReport", "DeckSupport", "write_deck"]
@@ -134,7 +135,11 @@ def _element_type(mesh: Mesh, element_id: int) -> str:
     return element_type
 
 
-def _material_block(materials: Mapping[str, Any]) -> List[str]:
+def _material_block(
+    materials: Mapping[str, Any],
+    elastic_compliance_matrix: Callable[[Any], Any],
+    material_symmetry: Callable[[Any], Any],
+) -> List[str]:
     lines: List[str] = []
     for name, supplied in sorted(materials.items()):
         material = _resolve_material(supplied)
@@ -263,7 +268,9 @@ def _orthotropic_shell_section(
 
 
 def _section_blocks(
-    model: DeckModel, groups: Mapping[Tuple[str, str], List[int]]
+    model: DeckModel,
+    groups: Mapping[Tuple[str, str], List[int]],
+    material_symmetry: Callable[[Any], Any],
 ) -> Tuple[List[str], List[str]]:
     lines: List[str] = []
     assumptions: List[str] = []
@@ -406,6 +413,7 @@ def write_deck(
 ) -> DeckReport:
     """Write a CalculiX input deck, and report what it approximated."""
 
+    capabilities = require_semantics()
     if analysis == "buckling":
         # The solver family has historically called this analysis "buckling";
         # CalculiX calls the keyword BUCKLE.  Accept both spellings at the API.
@@ -427,7 +435,7 @@ def write_deck(
         raise CalculixError("a deck needs at least one node", code="CCX107")
 
     element_lines, groups = _element_blocks(model)
-    section_lines, assumptions = _section_blocks(model, groups)
+    section_lines, assumptions = _section_blocks(model, groups, capabilities.material_symmetry)
     load_lines, load_summary = _load_block(model)
 
     lines: List[str] = [
@@ -447,7 +455,13 @@ def write_deck(
         set(model.mesh.quads) | set(model.mesh.tris) | set(model.mesh.beams)
     )
     lines.extend(_set_block("ELSET", "ALL", all_element_ids))
-    lines.extend(_material_block(model.materials))
+    lines.extend(
+        _material_block(
+            model.materials,
+            capabilities.elastic_compliance_matrix,
+            capabilities.material_symmetry,
+        )
+    )
     lines.extend(section_lines)
     lines.extend(_boundary_block(model))
 

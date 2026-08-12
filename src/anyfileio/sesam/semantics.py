@@ -22,13 +22,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
-from anymaterial import MaterialSpec
-from anymesher import Mesh
+if TYPE_CHECKING:
+    from anymaterial import MaterialSpec
+    from anymesher import Mesh
 
+from .._semantic_dependencies import require_semantics
 from ..diagnostics import FemDiagnostic, raise_if_errors
 from .document import (
     FemElement,
@@ -63,6 +65,10 @@ DEFAULT_POISSON_RATIO = 0.3
 SI_MODULUS_FLOOR = 1.0e9
 
 
+def _new_mesh() -> Mesh:
+    return require_semantics().Mesh()
+
+
 @dataclass(frozen=True)
 class SesamSupport:
     """A nodal restraint, as the file states it."""
@@ -86,7 +92,7 @@ class SesamSemantics:
     """
 
     document: SesamFemDocument
-    mesh: Mesh = field(default_factory=Mesh)
+    mesh: Mesh = field(default_factory=_new_mesh)
     materials: Dict[int, MaterialSpec] = field(default_factory=dict)
     material_of_element: Dict[int, int] = field(default_factory=dict)
     thickness_of_element: Dict[int, float] = field(default_factory=dict)
@@ -260,7 +266,9 @@ def shell_local_axes(
 
 
 def _material_specs(
-    document: SesamFemDocument, diagnostics: list[FemDiagnostic]
+    document: SesamFemDocument,
+    diagnostics: list[FemDiagnostic],
+    material_spec_type: type[MaterialSpec],
 ) -> Dict[int, MaterialSpec]:
     specs: Dict[int, MaterialSpec] = {}
     for material_id, material in document.materials.items():
@@ -278,7 +286,7 @@ def _material_specs(
                 )
             )
         try:
-            specs[material_id] = MaterialSpec(
+            specs[material_id] = material_spec_type(
                 name=material_name(material),
                 symmetry="isotropic",
                 constants={
@@ -476,6 +484,7 @@ def read_sesam_semantics(
 ) -> SesamSemantics:
     """Resolve a SESAM FEM file, or an already-parsed document, into neutral records."""
 
+    capabilities = require_semantics()
     document = (
         source
         if isinstance(source, SesamFemDocument)
@@ -483,10 +492,10 @@ def read_sesam_semantics(
     )
     diagnostics: list[FemDiagnostic] = list(document.diagnostics)
 
-    semantics = SesamSemantics(document=document)
+    semantics = SesamSemantics(document=document, mesh=capabilities.Mesh())
     for node in document.nodes.values():
         semantics.mesh.nodes[int(node.node_id)] = np.asarray(node.coordinates, dtype=float)
-    semantics.materials = _material_specs(document, diagnostics)
+    semantics.materials = _material_specs(document, diagnostics, capabilities.MaterialSpec)
     _install_elements(document, semantics, diagnostics)
     _install_supports(document, semantics, diagnostics)
     _install_loads(document, semantics, diagnostics)

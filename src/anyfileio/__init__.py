@@ -41,6 +41,7 @@ from .diagnostics import (
     CalculixError,
     FemDiagnostic,
     FileFormatError,
+    SemanticDependencyError,
     SesamFemError,
     has_errors,
     raise_if_errors,
@@ -113,7 +114,7 @@ from .sesam import (
     write_sesam_fem_document,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "BackendCompatibilityError",
@@ -160,6 +161,7 @@ __all__ = [
     "LengthUnit",
     "READERS",
     "SESAM_ELEMENT_REGISTRY",
+    "SemanticDependencyError",
     "SesamElementSpec",
     "SesamFemDocument",
     "SesamFemError",

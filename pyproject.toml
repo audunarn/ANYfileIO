@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package by that name would shadow it, so the distribution and import package
 # are `ANYfileio`/`anyfileio`.
 name = "ANYfileio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reading and writing structural finite-element interchange files: SESAM FEM/SIF and CalculiX INP/FRD/DAT"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,16 +26,15 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering",
 ]
-# The semantic layer hands back an ANYmesher mesh and ANYmaterial specifications,
-# and the deck writer reads material compliance through ANYmaterial.  The record
-# and document layers need neither, and stay importable without them being used.
-dependencies = [
-  "numpy>=1.26",
-  "ANYmesher>=0.1,<0.2",
-  "ANYmaterial>=0.1,<0.2",
-]
+# Records, documents, built-in formats, and CAD-neutral contracts are NumPy-only.
+# Semantic mesh/material operations are isolated in the `semantics` extra below.
+dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
+semantics = [
+  "ANYmesher>=0.2,<0.3",
+  "ANYmaterial>=0.1,<0.2",
+]
 # The file inspector uses tkinter from the standard library, so it adds no
 # wheel.  The extra exists so `pip install ANYfileio[gui]` is meaningful and
 # stays meaningful if that ever stops being true.
