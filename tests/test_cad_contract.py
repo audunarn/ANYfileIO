@@ -219,6 +219,20 @@ def test_backend_factory_core_binds_tessellation_result() -> None:
             tessellation_options=CadTessellationOptions(),
             prototype_meshes=(),
         )
+    foreign = CadDiagnostic(
+        "cad.mesh.foreign",
+        "warning",
+        "foreign diagnostic",
+        (CadEntityRef("cad-import-v1:" + "2" * 64, "face", 1),),
+    )
+    bad_mesh = CadPrototypeMesh(1, mesh.tessellation, mesh.local_bounds_m, (foreign,))
+    with pytest.raises(CadValidationError) as caught:
+        CadDocument._from_backend(
+            manifest=_manifest(),
+            tessellation_options=CadTessellationOptions(),
+            prototype_meshes=(bad_mesh,),
+        )
+    assert caught.value.code == "cad.tessellation.diagnostic_owner_mismatch"
 
 
 def test_occurrence_transforms_and_instancing_are_preserved() -> None:

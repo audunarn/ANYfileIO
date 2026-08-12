@@ -769,6 +769,12 @@ def _bind_tessellation(
         for owner in (*mesh.tessellation.face_owners, *mesh.tessellation.edge_owners):
             if owner.document_id != manifest.document_id:
                 raise CadValidationError("mesh owner belongs to another document", code="cad.tessellation.owner_mismatch")
+        for diagnostic in mesh.diagnostics:
+            if any(entity.document_id != manifest.document_id for entity in diagnostic.entities):
+                raise CadValidationError(
+                    "mesh diagnostic entity belongs to another document",
+                    code="cad.tessellation.diagnostic_owner_mismatch",
+                )
         if mesh.prototype_id not in prototype_ids:
             raise CadValidationError("mesh prototype is not in the manifest", code="cad.tessellation.prototype_mismatch")
     return CadTessellationResult(_source_identity_for_manifest(manifest), options, tuple(meshes))

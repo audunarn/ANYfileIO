@@ -64,7 +64,7 @@ READERS: Mapping[str, Tuple[Callable[..., Any], str]] = {
 }
 
 _BUILTIN_FORMATS = (
-    FormatDescriptor("sesam-dat", (".dat",), "finite_element_results", frozenset({"read", "inspect"})),
+    FormatDescriptor("calculix-dat", (".dat",), "finite_element_results", frozenset({"read", "inspect"})),
     FormatDescriptor("sesam-fem", (".fem",), "finite_element_model", frozenset({"read", "inspect"})),
     FormatDescriptor("calculix-frd", (".frd",), "finite_element_results", frozenset({"read", "inspect"})),
     FormatDescriptor("calculix-inp", (".inp",), "finite_element_model", frozenset({"read", "inspect"})),

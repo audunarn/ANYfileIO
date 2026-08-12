@@ -73,13 +73,29 @@ class _Backend:
             True,
         )
 
-    def read(self, *args: Any, **kwargs: Any) -> Any:
+    def read(
+        self,
+        source_snapshot: Path,
+        *,
+        source_sha256: str,
+        source_name: str,
+        options: Any,
+        tessellation_options: Any,
+        cancellation: Any,
+    ) -> Any:
         raise NotImplementedError
 
-    def tessellate(self, *args: Any, **kwargs: Any) -> Any:
+    def tessellate(self, document: Any, *, options: Any, cancellation: Any) -> Any:
         raise NotImplementedError
 
-    def translate(self, *args: Any, **kwargs: Any) -> Any:
+    def translate(
+        self,
+        document: Any,
+        destination_temporary: Path,
+        *,
+        options: Any,
+        cancellation: Any,
+    ) -> Any:
         raise NotImplementedError
 
 
@@ -173,11 +189,48 @@ def test_capabilities_are_validated_before_ready_state(monkeypatch) -> None:
     backend = _Backend()
     backend.capabilities = CadCapabilities(read_formats=frozenset({"step"}))
     _install_entry_points(monkeypatch, _EntryPoint(lambda: backend))
-    with pytest.raises(BackendCompatibilityError):
+    with pytest.raises(BackendLoadError) as caught:
         _load_backend()
     status = backend_status()
-    assert status.state == "incompatible"
+    assert caught.value.code == "cad.backend.load_failed"
+    assert status.state == "broken"
     assert status.capabilities == backend.capabilities
+
+
+def test_non_identity_provider_contract_defects_are_broken(monkeypatch) -> None:
+    wrong_target = _EntryPoint(lambda: _Backend())
+    wrong_target.value = "other.module:get_backend"
+    _install_entry_points(monkeypatch, wrong_target)
+    with pytest.raises(BackendLoadError):
+        _load_backend()
+    assert backend_status().state == "broken"
+    assert wrong_target.load_calls == 0
+
+    _reset_backend_cache_for_tests()
+    wrong_distribution = _EntryPoint(lambda: _Backend())
+    wrong_distribution.dist = _Distribution("other-distribution")
+    _install_entry_points(monkeypatch, wrong_distribution)
+    with pytest.raises(BackendLoadError):
+        _load_backend()
+    assert backend_status().state == "broken"
+    assert wrong_distribution.load_calls == 0
+
+    _reset_backend_cache_for_tests()
+    invalid_version = _Backend()
+    invalid_version.backend_version = ""
+    _install_entry_points(monkeypatch, _EntryPoint(lambda: invalid_version))
+    with pytest.raises(BackendLoadError):
+        _load_backend()
+    assert backend_status().diagnostic is not None
+    assert backend_status().diagnostic.code == "cad.backend.load_failed"
+
+    _reset_backend_cache_for_tests()
+    invalid_shape = _Backend()
+    invalid_shape.translate = lambda *args, **kwargs: None
+    _install_entry_points(monkeypatch, _EntryPoint(lambda: invalid_shape))
+    with pytest.raises(BackendLoadError):
+        _load_backend()
+    assert backend_status().state == "broken"
 
 
 def test_missing_backend_error_has_exact_code_and_install_hint(monkeypatch) -> None:
@@ -203,6 +256,8 @@ def test_optional_cad_formats_are_known_without_provider(monkeypatch) -> None:
     calls = _install_entry_points(monkeypatch)
     formats = {item.name: item for item in known_formats()}
     assert {"step", "iges", "brep"} <= formats.keys()
+    assert formats["calculix-dat"].suffixes == (".dat",)
+    assert "sesam-dat" not in formats
     assert formats["step"].suffixes == (".step", ".stp")
     assert calls == [0]
 

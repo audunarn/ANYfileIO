@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
 from dataclasses import dataclass
 from importlib import metadata
@@ -202,6 +203,68 @@ def _required_capabilities(capabilities: CadCapabilities) -> bool:
 _IMPORT_MODES = frozenset({"manifest_only", "preview", "live"})
 
 
+def _method_has_exact_shape(
+    method: Any,
+    positional: tuple[str, ...],
+    keyword_only: tuple[str, ...],
+) -> bool:
+    if not callable(method):
+        return False
+    try:
+        parameters = tuple(inspect.signature(method).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if tuple(parameter.name for parameter in parameters) != (*positional, *keyword_only):
+        return False
+    return all(
+        parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        for parameter in parameters[: len(positional)]
+    ) and all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in parameters[len(positional) :]
+    )
+
+
+def _set_broken_status(
+    *,
+    entry_text: str,
+    distribution: str | None,
+    message: str,
+    cause: BaseException | None = None,
+    observed_protocol: Any = None,
+    observed_compatibility: Any = None,
+    capabilities: CadCapabilities | None = None,
+) -> BackendLoadError:
+    global _FAILURE, _STATUS
+    diagnostic = _diagnostic(
+        "cad.backend.load_failed",
+        message,
+        state="broken",
+        entry_point=entry_text,
+        distribution=distribution,
+        observed_protocol=observed_protocol,
+        observed_compatibility=observed_compatibility,
+        cause=cause,
+    )
+    failure = BackendLoadError(diagnostic=diagnostic)
+    if cause is not None:
+        failure.__cause__ = cause
+    _FAILURE = failure
+    _STATUS = BackendStatus(
+        BACKEND_ID,
+        "broken",
+        entry_text,
+        distribution,
+        CAD_BACKEND_PROTOCOL_VERSION,
+        observed_protocol if isinstance(observed_protocol, int) else None,
+        BACKEND_COMPATIBILITY_VERSION,
+        observed_compatibility if isinstance(observed_compatibility, int) else None,
+        capabilities,
+        diagnostic,
+    )
+    return failure
+
+
 def _raise_cached_failure(status: BackendStatus) -> None:
     if _FAILURE is not None:
         raise _FAILURE
@@ -232,34 +295,23 @@ def _load_backend() -> CadBackendProtocol:
         assert _ENTRY_POINT is not None
         entry_text = _entry_point_text(_ENTRY_POINT)
         distribution = _distribution_name(_ENTRY_POINT)
+        if entry_text != ENTRY_POINT_TARGET or distribution is None or distribution.casefold() != "anyfileio-occt":
+            raise _set_broken_status(
+                entry_text=entry_text,
+                distribution=distribution,
+                message="OCCT backend entry-point target or distribution is invalid",
+            )
         try:
             factory = _ENTRY_POINT.load()
             if not callable(factory):
                 raise TypeError("entry-point target is not callable")
             backend = factory()
         except Exception as error:
-            diagnostic = _diagnostic(
-                "cad.backend.load_failed",
-                "OCCT backend could not be loaded",
-                state="broken",
-                entry_point=entry_text,
+            failure = _set_broken_status(
+                entry_text=entry_text,
                 distribution=distribution,
+                message="OCCT backend could not be loaded",
                 cause=error,
-            )
-            failure = BackendLoadError(diagnostic=diagnostic)
-            failure.__cause__ = error
-            _FAILURE = failure
-            _STATUS = BackendStatus(
-                BACKEND_ID,
-                "broken",
-                entry_text,
-                distribution,
-                CAD_BACKEND_PROTOCOL_VERSION,
-                None,
-                BACKEND_COMPATIBILITY_VERSION,
-                None,
-                None,
-                diagnostic,
             )
             raise failure
 
@@ -268,23 +320,15 @@ def _load_backend() -> CadBackendProtocol:
         observed_compatibility = getattr(backend, "backend_compatibility_version", None)
         capabilities = getattr(backend, "capabilities", None)
         backend_version = getattr(backend, "backend_version", None)
-        compatible = (
-            entry_text == ENTRY_POINT_TARGET
-            and (distribution is None or distribution.casefold() == "anyfileio-occt")
-            and
+        identity_compatible = (
             observed_id == BACKEND_ID
             and observed_protocol == CAD_BACKEND_PROTOCOL_VERSION
             and observed_compatibility == BACKEND_COMPATIBILITY_VERSION
-            and isinstance(backend_version, str)
-            and bool(backend_version)
-            and isinstance(capabilities, CadCapabilities)
-            and _required_capabilities(capabilities)
-            and all(callable(getattr(backend, name, None)) for name in ("read", "tessellate", "translate"))
         )
-        if not compatible:
+        if not identity_compatible:
             diagnostic = _diagnostic(
                 "cad.backend.incompatible",
-                "OCCT backend does not satisfy protocol 1",
+                "OCCT backend identity or protocol is incompatible",
                 state="incompatible",
                 entry_point=entry_text,
                 distribution=distribution,
@@ -306,6 +350,37 @@ def _load_backend() -> CadBackendProtocol:
                 diagnostic,
             )
             raise failure
+
+        valid_loaded_backend = (
+            isinstance(backend_version, str)
+            and bool(backend_version)
+            and isinstance(capabilities, CadCapabilities)
+            and _required_capabilities(capabilities)
+            and _method_has_exact_shape(
+                getattr(backend, "read", None),
+                ("source_snapshot",),
+                ("source_sha256", "source_name", "options", "tessellation_options", "cancellation"),
+            )
+            and _method_has_exact_shape(
+                getattr(backend, "tessellate", None),
+                ("document",),
+                ("options", "cancellation"),
+            )
+            and _method_has_exact_shape(
+                getattr(backend, "translate", None),
+                ("document", "destination_temporary"),
+                ("options", "cancellation"),
+            )
+        )
+        if not valid_loaded_backend:
+            raise _set_broken_status(
+                entry_text=entry_text,
+                distribution=distribution,
+                message="OCCT backend metadata, capabilities, or call shapes are invalid",
+                observed_protocol=observed_protocol,
+                observed_compatibility=observed_compatibility,
+                capabilities=capabilities if isinstance(capabilities, CadCapabilities) else None,
+            )
 
         _BACKEND = backend
         _STATUS = BackendStatus(
