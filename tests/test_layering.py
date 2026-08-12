@@ -41,6 +41,9 @@ FORBIDDEN = frozenset(
 # so that importing the package never requires an optional dependency.
 OPTIONAL_IMPORT_EXCEPTIONS: dict[str, frozenset[str]] = {}
 
+CAD_NEUTRAL_MODULES = ("cad.py", "cad_backend.py", "formats.py")
+CAD_FORBIDDEN_IMPORTS = frozenset({"OCP", "cadquery", "anyfileio_occt", "anygeometry"})
+
 
 def _modules() -> list[Path]:
     return sorted(SOURCE_ROOT.rglob("*.py"))
@@ -99,3 +102,13 @@ def test_third_party_imports_are_declared() -> None:
         "these imports are neither standard library nor declared dependencies; "
         f"add them to pyproject.toml and ALLOWED_THIRD_PARTY, or import them lazily: {offenders}"
     )
+
+
+def test_cad_neutral_modules_do_not_import_heavy_or_geometry_packages() -> None:
+    offenders = {}
+    for relative in CAD_NEUTRAL_MODULES:
+        path = SOURCE_ROOT / relative
+        forbidden = sorted(_top_level_imports(path) & CAD_FORBIDDEN_IMPORTS)
+        if forbidden:
+            offenders[relative] = forbidden
+    assert not offenders, f"CAD-neutral modules import optional heavy/geometry packages: {offenders}"
