@@ -113,7 +113,7 @@ if len(_SUFFIX_INDEX) != sum(len(item.suffixes) for item in _KNOWN_FORMATS):
 def supported_suffixes() -> Tuple[str, ...]:
     """Every suffix :func:`read` recognizes."""
 
-    return tuple(sorted(READERS))
+    return tuple(sorted(_SUFFIX_INDEX))
 
 
 def known_formats() -> tuple[FormatDescriptor, ...]:
@@ -170,6 +170,11 @@ def read(path: str | Path, **options: Any) -> Any:
     suffix = target.suffix.lower()
     entry = READERS.get(suffix)
     if entry is None:
+        descriptor = _SUFFIX_INDEX.get(suffix)
+        if descriptor is not None and descriptor.backend_id is not None:
+            from .cad_operations import read_cad
+
+            return read_cad(target, **options)
         raise FileFormatError(
             f"unrecognized suffix {suffix!r}; expected one of {', '.join(supported_suffixes())}",
             code="FEM010",

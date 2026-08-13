@@ -298,8 +298,19 @@ def test_brep_requires_declared_capability(monkeypatch) -> None:
     assert "brep" in {item.name for item in available_formats()}
 
 
-def test_supported_suffixes_remains_the_five_builtin_suffixes() -> None:
-    assert supported_suffixes() == (".dat", ".fem", ".frd", ".inp", ".sif")
+def test_supported_suffixes_include_core_known_cad_suffixes() -> None:
+    assert supported_suffixes() == (
+        ".brep",
+        ".dat",
+        ".fem",
+        ".frd",
+        ".iges",
+        ".igs",
+        ".inp",
+        ".sif",
+        ".step",
+        ".stp",
+    )
 
 
 def test_builtin_dispatch_never_scans_or_loads_plugins(monkeypatch, tmp_path) -> None:

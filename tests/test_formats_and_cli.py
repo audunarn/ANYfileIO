@@ -81,7 +81,18 @@ def frd_file(tmp_path):
 
 
 def test_every_suffix_is_described_and_dispatched(fem_file, frd_file) -> None:
-    assert supported_suffixes() == (".dat", ".fem", ".frd", ".inp", ".sif")
+    assert supported_suffixes() == (
+        ".brep",
+        ".dat",
+        ".fem",
+        ".frd",
+        ".iges",
+        ".igs",
+        ".inp",
+        ".sif",
+        ".step",
+        ".stp",
+    )
     assert "SESAM" in describe(fem_file)
     assert "CalculiX" in describe(frd_file)
 
@@ -99,6 +110,20 @@ def test_options_reach_the_format_reader(tmp_path) -> None:
         read(path)
     document = read(path, strict=False)
     assert any(item.code == "FEM003" for item in document.diagnostics)
+
+
+def test_cad_suffix_dispatches_to_read_cad(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "assembly.step"
+    marker = object()
+    calls = []
+
+    def fake_read_cad(target, **options):
+        calls.append((target, options))
+        return marker
+
+    monkeypatch.setattr("anyfileio.cad_operations.read_cad", fake_read_cad)
+    assert read(path, options="sentinel") is marker
+    assert calls == [(path, {"options": "sentinel"})]
 
 
 def test_an_unrecognized_suffix_names_the_ones_that_work(tmp_path) -> None:
@@ -137,11 +162,11 @@ def _json_run(capsys, *argv: str) -> tuple[int, object]:
     return code, json.loads(out)
 
 
-def test_formats_lists_what_the_tool_reads(capsys) -> None:
+def test_formats_lists_builtin_cli_readers_only(capsys) -> None:
     code, payload = _json_run(capsys, "--json", "formats")
 
     assert code == 0
-    assert set(payload) == set(supported_suffixes())
+    assert set(payload) == {".dat", ".fem", ".frd", ".inp", ".sif"}
 
 
 def test_inspect_summarizes_a_fem_document(capsys, fem_file) -> None:
