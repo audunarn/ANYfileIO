@@ -81,6 +81,9 @@ def test_the_inspector_opens_empty(inspector, root) -> None:
 
 
 def test_loading_a_fem_file_fills_every_panel(inspector, root, fem_file) -> None:
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
+
     inspector.load(fem_file)
     root.update()
 

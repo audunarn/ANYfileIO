@@ -5,9 +5,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from anymaterial import IsotropicMaterial, MaterialSpec, OrthotropicMaterial
-from anymesher import Mesh, simple_panel_mesh
-
 from anyfileio import (
     CalculixError,
     CalculixParsedResults,
@@ -82,6 +79,18 @@ def _write(tmp_path, name: str, text: str):
     path = tmp_path / name
     path.write_text(text, encoding="ascii")
     return path
+
+
+def _semantic_types():
+    anymesher = pytest.importorskip("anymesher")
+    anymaterial = pytest.importorskip("anymaterial")
+    return (
+        anymesher.Mesh,
+        anymesher.simple_panel_mesh,
+        anymaterial.MaterialSpec,
+        anymaterial.IsotropicMaterial,
+        anymaterial.OrthotropicMaterial,
+    )
 
 
 def test_frd_reads_coordinates_displacements_and_stresses(tmp_path) -> None:
@@ -187,6 +196,7 @@ def test_geometry_classification_recognizes_a_cylinder() -> None:
 
 
 def _plate_deck_model(**overrides) -> DeckModel:
+    _, simple_panel_mesh, MaterialSpec, _, _ = _semantic_types()
     mesh = simple_panel_mesh(2.0, 1.0, 0.01, 2, 2)
     model = DeckModel(
         mesh=mesh,
@@ -247,6 +257,7 @@ def test_written_decks_round_trip_through_the_deck_reader(tmp_path) -> None:
 
 
 def test_a_live_material_works_as_well_as_a_specification(tmp_path) -> None:
+    _, _, _, IsotropicMaterial, _ = _semantic_types()
     model = _plate_deck_model()
     model.materials = {"steel": IsotropicMaterial("steel", 210.0e9, 0.3, density=7850.0)}
     write_deck(model, tmp_path / "live.inp")
@@ -256,6 +267,7 @@ def test_a_live_material_works_as_well_as_a_specification(tmp_path) -> None:
 
 
 def test_orthotropic_shells_need_a_resolved_orientation(tmp_path) -> None:
+    _, simple_panel_mesh, _, _, OrthotropicMaterial = _semantic_types()
     mesh = simple_panel_mesh(2.0, 1.0, 0.01, 1, 1)
     model = DeckModel(
         mesh=mesh,
@@ -286,6 +298,7 @@ def test_orthotropic_shells_need_a_resolved_orientation(tmp_path) -> None:
 
 
 def test_an_orthotropic_beam_is_refused_rather_than_approximated(tmp_path) -> None:
+    Mesh, _, _, _, OrthotropicMaterial = _semantic_types()
     mesh = Mesh()
     mesh.nodes[1] = np.array([0.0, 0.0, 0.0])
     mesh.nodes[2] = np.array([1.0, 0.0, 0.0])
@@ -306,6 +319,7 @@ def test_an_orthotropic_beam_is_refused_rather_than_approximated(tmp_path) -> No
 
 
 def test_beam_sections_report_what_they_approximated(tmp_path) -> None:
+    Mesh, _, _, IsotropicMaterial, _ = _semantic_types()
     mesh = Mesh()
     mesh.nodes[1] = np.array([0.0, 0.0, 0.0])
     mesh.nodes[2] = np.array([1.0, 0.0, 0.0])
@@ -361,6 +375,7 @@ def test_reaction_totals_fall_back_to_all_nodes_without_supports(tmp_path) -> No
 
 
 def test_the_writer_refuses_what_it_cannot_represent(tmp_path) -> None:
+    Mesh, _, _, _, _ = _semantic_types()
     with pytest.raises(CalculixError, match="unsupported analysis"):
         write_deck(_plate_deck_model(), tmp_path / "x.inp", analysis="creep")
 

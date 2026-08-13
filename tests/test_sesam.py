@@ -74,6 +74,9 @@ def test_read_document_preserves_unknown_and_mixed_shell_topology() -> None:
 
 
 def test_semantics_resolves_a_neutral_mesh_and_records() -> None:
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
+
     path = _work_dir() / "import_shells.FEM"
     path.write_text(_mixed_shell_fem(), encoding="ascii")
 
@@ -326,6 +329,9 @@ def test_sif_stress_defaults_to_first_load_case_instead_of_mixing() -> None:
 
 
 def test_semantics_resolves_explicit_shell_local_axes() -> None:
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
+
     path = _work_dir() / "transformed_shell.SIF"
     path.write_text(_transformed_shell_sif(), encoding="ascii")
 
@@ -339,6 +345,9 @@ def test_semantics_resolves_explicit_shell_local_axes() -> None:
 
 
 def test_semantics_maps_gunivec_to_beam_orientation() -> None:
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
+
     path = _work_dir() / "oriented_beam.FEM"
     path.write_text(_oriented_beam_fem(), encoding="ascii")
 

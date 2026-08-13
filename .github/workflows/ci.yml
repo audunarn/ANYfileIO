@@ -4,17 +4,8 @@ on:
   push:
   pull_request:
 
-# ANYmesher and ANYmaterial are real requirements of this package, but they are
-# not on PyPI yet, so `pip install -e .` cannot resolve them.  Installing them
-# from their repositories first satisfies the requirement; once both are
-# published these two lines can go and pip will resolve them normally.
-env:
-  SIBLINGS: >-
-    git+https://github.com/audunarn/ANYmaterial
-    git+https://github.com/audunarn/ANYmesh
-
 jobs:
-  pytest:
+  base-only:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,9 +20,107 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install ${{ env.SIBLINGS }}
       - run: python -m pip install -e ".[dev]"
-      - run: python -c "import anyfileio; print(anyfileio.__version__)"
+      - name: Verify NumPy-only base isolation
+        shell: python
+        run: |
+          from importlib import metadata, util
+
+          optional = (
+              ("ANYgeometry", "anygeometry"),
+              ("ANYmesher", "anymesher"),
+              ("ANYmaterial", "anymaterial"),
+          )
+          for distribution, module in optional:
+              try:
+                  metadata.distribution(distribution)
+              except metadata.PackageNotFoundError:
+                  pass
+              else:
+                  raise AssertionError(f"base installed optional distribution {distribution}")
+              assert util.find_spec(module) is None, f"base imports optional module {module}"
+
+          import anyfileio
+          print(anyfileio.__version__)
+      - run: python -m pytest
+
+  semantics:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e676783256833f0c17e8ff6536f0f73365998928"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@4626887667f4c251479d26f321b9e73b046a2783"
+      - run: python -m pip install -e ".[dev,semantics]"
+      - name: Verify immutable semantic owners
+        shell: python
+        run: |
+          import importlib
+          from importlib import metadata
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          expected = (
+              (
+                  "ANYgeometry",
+                  "0.2.1",
+                  "anygeometry",
+                  "https://github.com/audunarn/ANYgeometry.git",
+                  "37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa",
+              ),
+              (
+                  "ANYmesher",
+                  "0.2.1",
+                  "anymesher",
+                  "https://github.com/audunarn/ANYmesh.git",
+                  "e676783256833f0c17e8ff6536f0f73365998928",
+              ),
+              (
+                  "ANYmaterial",
+                  "0.1.0",
+                  "anymaterial",
+                  "https://github.com/audunarn/ANYmaterial.git",
+                  "4626887667f4c251479d26f321b9e73b046a2783",
+              ),
+          )
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          environment = Path(sys.prefix).resolve()
+
+          for distribution_name, version, module_name, repository, commit in expected:
+              distribution = metadata.distribution(distribution_name)
+              assert distribution.version == version
+
+              module = importlib.import_module(module_name)
+              origin = Path(module.__file__).resolve()
+              assert not origin.is_relative_to(workspace)
+              assert origin.is_relative_to(environment)
+
+              direct_url_text = distribution.read_text("direct_url.json")
+              assert direct_url_text is not None
+              direct_url = json.loads(direct_url_text)
+              assert set(direct_url) == {"url", "vcs_info"}
+              assert direct_url["url"] == repository
+              assert direct_url["vcs_info"] == {
+                  "vcs": "git",
+                  "requested_revision": commit,
+                  "commit_id": commit,
+              }
+
+          import anyfileio
+          print(anyfileio.__version__)
       - run: python -m pytest
 
   # The record and document layers must stay usable with nothing but numpy, so
@@ -48,7 +137,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install ${{ env.SIBLINGS }}
       - run: python -m pip install -e ".[dev]" anyio
       - run: python -c "import anyio, anyfileio; from importlib.metadata import version; print(version('anyio'), anyfileio.__version__)"
       - run: python -c "import anyio; assert 'anyfileio' not in anyio.__file__"
@@ -67,7 +155,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip build
-      - run: python -m pip install ${{ env.SIBLINGS }}
       - run: python -m build
       - run: python -m pip install dist/*.whl
       - run: cd /tmp && python -c "import anyfileio; print(anyfileio.__version__)"

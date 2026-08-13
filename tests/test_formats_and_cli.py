@@ -257,6 +257,9 @@ def test_convert_only_canonicalizes_sesam_documents(capsys, fem_file, tmp_path) 
 
 
 def test_summary_resolves_the_document_into_neutral_records(capsys, fem_file) -> None:
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
+
     code, payload = _json_run(capsys, "--json", "summary", str(fem_file))
 
     assert code == 0

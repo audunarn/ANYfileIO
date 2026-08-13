@@ -45,7 +45,7 @@ qualification gate.
 
 | Repository | Observed exact state | CAD authority |
 | --- | --- | --- |
-| ANYfileIO | primary checkout clean at accepted Forseti M2 `0d2c7f8ef1b17f42f667d6183125e51cb650a70d`, direct parent `82a0f5f110361fcd902cd3aac5d4c6beeaa187fa`; registered isolated contract worktree is an uncommitted direct-child candidate | Contract/core work descends from M2 and preserves its README, pyproject, and packaging-test identity hunks. |
+| ANYfileIO | accepted source tip `5513881827cdee9fd337497a2730a5912d8ea751`; canonical metadata/runtime transition `1f0b5780df7f025fc786fd3db2cba9da2104fb5c` | NumPy-only core, lazy semantic runtime, CAD-neutral API/discovery/operations, and OCP-free preview artifact source are accepted. |
 | ANYfileio-occt | clean license-only root `571231dc4c7d8b4131daac6b719a6b93125a20b4` | Separate heavy backend after registered exact-file plans. |
 | ANYgeometry | public tip `37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa` on `native_hybrid_mesher`; qualified code parent `8828019e0f940b0d6f240b98f8be17d6f306155b`; version 0.2.1/schema 4; unrelated untracked `.github/`, `.idea/vcs.xml`, and `dist_gap_closure/` | Read-only accepted committed dependency; never touch the dirty checkout. |
 | ANYmesh / ANYmesher | current committed tip `574fac99db064cc447bdb3e91ff029047a3c2248` on `native_hybrid_mesher`; untracked installed-wheel smoke reports remain | Read-only; newer commits/reports do not themselves constitute the accepted 0.2.x owner handoff/artifact. |
@@ -77,34 +77,26 @@ The CAD semantic-operation acceptance range is exactly
 operation boundary and never infers compatibility from a broader
 package-install range.
 
-The accepted M2 `pyproject.toml`, `README.md`, and packaging-test hunks remain
-byte-identical in this direct-child docs commit. A future, disjoint resolver
-owner may propose changing canonical package-install metadata from
-`ANYmesher>=0.1,<0.2` to exactly `ANYmesher>=0.1,<0.3`, but only after real
-hash-pinned ANYmesher 0.1.0 and 0.2.1 wheel compatibility plus a clean combined
-resolver gate. That range is transitional legacy-install metadata only: it
-does not authorize CAD semantic use of 0.1.x, cannot count as CAD capability,
-and cannot merge by itself into the CAD 0.2 line.
+The canonical metadata/runtime transition is accepted at
+`1f0b5780df7f025fc786fd3db2cba9da2104fb5c`: the base requirement is exactly
+NumPy, and `ANYmesher>=0.2,<0.3` plus `ANYmaterial>=0.1,<0.2` live only in the
+`semantics` extra. Base imports are eager-free. Semantic operations lazy-load
+their owners and fail with the typed `SEM001`, `SEM002`, or `SEM003` diagnostic
+when an owner is missing, has incompatible metadata, or cannot be imported.
 
-The final CAD base requires a separately registered canonical ANYfileIO
-metadata/runtime owner to move both `ANYmesher>=0.2,<0.3` and
-`ANYmaterial>=0.1,<0.2` out of base requirements and into the `semantics`
-extra. That same owner eliminates eager base imports. Base-wheel import, core
-CAD records, format discovery, and OCP-free artifact reopen must work with
-neither semantic package installed. A semantic entry point lazy-loads the two
-packages only when invoked, checks the CAD-accepted mesher range, and otherwise
-fails with a typed missing-extra/incompatible-version diagnostic without
-breaking core operations.
+Source CI definitions are implemented as distinct base-only and `[semantics]`
+cells. The base cell asserts that ANYgeometry, ANYmesher, and ANYmaterial are
+absent. The semantics source cell installs these immutable inputs in order,
+each with `--no-deps`, and verifies version, source origin, and PEP 610 commit:
 
-`pyproject.toml`, `tests/test_packaging.py`, the publish workflow, `README.md`,
-and `CHANGELOG.md` are reserved to that separately registered resolver owner.
-CAD core/provider plans neither edit those files/hunks nor depend on the
-resolver proposal landing. After any resolver commit, the Boss must register an
-explicit final merge/rebase order and receive protected-M2 plus CAD-contract
-diff proof before integration; no order is inferred here. The owner must record
-exact base-only and `[semantics]` resolver cells, focused eager-import/missing-
-extra regressions, version synchronization, and a separate publication gate.
-This document grants no metadata, version, workflow, or publication authority.
+1. ANYgeometry `37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa`;
+2. ANYmesh / ANYmesher `e676783256833f0c17e8ff6536f0f73365998928`;
+3. ANYmaterial `4626887667f4c251479d26f321b9e73b046a2783`.
+
+These are source-cell inputs, not built-wheel, resolver, or release evidence.
+Base installed-wheel qualification remains `UNRUN`. Semantics installed-wheel
+qualification remains `BLOCKED` on accepted hash-pinned artifacts for all
+three owners and becomes `UNRUN` only after those artifacts exist.
 
 ### 3.2 Heavy provider and geometry adapter
 
@@ -319,8 +311,8 @@ built-wheel isolation gate.
 
 | Environment | Required result | Status |
 | --- | --- | --- |
-| ANYfileio base only | NumPy plus core; neither ANYmesher nor ANYmaterial installed; import/core CAD records/artifact reopen pass | `BLOCKED` on canonical metadata/runtime owner, then `UNRUN` |
-| ANYfileio semantics | accepted `ANYmesher>=0.2,<0.3` + `ANYmaterial>=0.1,<0.2`; lazy semantic operation succeeds | `BLOCKED` on mesher and metadata/runtime handoffs, then `UNRUN` |
+| ANYfileio base only | NumPy plus core; ANYgeometry, ANYmesher, and ANYmaterial absent; import/core CAD records/artifact reopen pass | Source-CI definition implemented; installed-wheel qualification `UNRUN` |
+| ANYfileio semantics | accepted `ANYmesher>=0.2,<0.3` + `ANYmaterial>=0.1,<0.2`; lazy semantic operation succeeds | Source-CI definition implemented with the three immutable commits above; installed-wheel qualification `BLOCKED` on accepted hash-pinned owner artifacts, then `UNRUN` |
 | Transitional legacy resolver | real hash-pinned ANYmesher 0.1.0 and 0.2.1 compatibility for proposed install-only `>=0.1,<0.3`; never a CAD-capability pass and never merged alone | `BLOCKED` on separate resolver-owner plan/evidence |
 | ANYfileio-occt base | core + NumPy + exact OCP wheel; no geometry | `UNRUN` |
 | ANYfileio-occt geometry | heavy base + ANYgeometry 0.2.1; no consumer | `UNRUN` |
@@ -376,11 +368,10 @@ future disjoint resolver evidence/owner commit (if accepted)
   -> protected M2 + CAD-contract diff proof
   -> integration without weakening CAD >=0.2 semantic checks
 
-accepted ANYmesher 0.2.x owner handoff
-  -> exact semantics-extra floor and lazy semantic integration
-  -> semantic resolver qualification
+accepted hash-pinned ANYgeometry / ANYmesher / ANYmaterial owner artifacts
+  -> semantics installed-wheel qualification
 
-accepted core public API + accepted semantic integration
+accepted core public API + accepted lazy semantic runtime
   -> complete ANYfileIO 0.2 qualification
 
 accepted imported-CAD heavy API + accepted ANYfem V6/native/UI handoff

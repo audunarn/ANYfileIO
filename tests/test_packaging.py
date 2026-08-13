@@ -7,6 +7,7 @@ dependencies turns the layering check into decoration.
 
 from __future__ import annotations
 
+import ast
 import re
 import tomllib
 from pathlib import Path
@@ -47,6 +48,44 @@ def _declared_dependencies() -> set[str]:
     for extra in project.get("optional-dependencies", {}).values():
         requirements.extend(extra)
     return _requirement_names(requirements)
+
+
+def _repository_text(relative: str) -> str:
+    return (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+
+
+def _workflow_jobs() -> dict[str, str]:
+    text = _repository_text(".github/workflows/ci.yml")
+    headings = list(re.finditer(r"(?m)^  ([a-z][a-z0-9-]*):\n", text))
+    return {
+        heading.group(1): text[
+            heading.start() : headings[index + 1].start() if index + 1 < len(headings) else None
+        ]
+        for index, heading in enumerate(headings)
+    }
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"missing function {name}")
+
+
+def _importorskip_modules(function: ast.FunctionDef) -> set[str]:
+    modules = set()
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Name):
+            continue
+        if node.func.value.id != "pytest" or node.func.attr != "importorskip":
+            continue
+        if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+            modules.add(node.args[0].value)
+    return modules
 
 
 def test_version_matches_pyproject() -> None:
@@ -122,3 +161,111 @@ def test_run_gui_bootstraps_without_semantic_sibling_paths() -> None:
     assert 'if __name__ == "__main__":\n    raise SystemExit(main())' in text
     assert 'parent / "ANYmesh"' not in text
     assert 'parent / "ANYmaterial"' not in text
+
+
+def test_ci_separates_numpy_only_base_from_semantics() -> None:
+    workflow = _repository_text(".github/workflows/ci.yml")
+    jobs = _workflow_jobs()
+
+    assert "pytest" not in jobs
+    assert {"base-only", "semantics", "coexists-with-anyio", "wheel"} <= set(jobs)
+    assert "SIBLINGS" not in workflow
+
+    base = jobs["base-only"]
+    assert 'python -m pip install -e ".[dev]"' in base
+    assert "git+https://" not in base
+    assert "[dev,semantics]" not in base
+    for distribution, module in (
+        ("ANYgeometry", "anygeometry"),
+        ("ANYmesher", "anymesher"),
+        ("ANYmaterial", "anymaterial"),
+    ):
+        assert f'("{distribution}", "{module}")' in base
+    assert "metadata.distribution(distribution)" in base
+    assert "util.find_spec(module) is None" in base
+
+    assert "python -m pytest" in base
+    assert "python -m pytest" in jobs["semantics"]
+    assert "git+https://" not in jobs["coexists-with-anyio"]
+    assert "git+https://" not in jobs["wheel"]
+
+
+def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
+    semantics = _workflow_jobs()["semantics"]
+    installs = (
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e676783256833f0c17e8ff6536f0f73365998928"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@4626887667f4c251479d26f321b9e73b046a2783"',
+    )
+    positions = [semantics.index(command) for command in installs]
+    assert positions == sorted(positions)
+    assert 'python -m pip install -e ".[dev,semantics]"' in semantics
+    assert "--index" not in semantics
+    assert "--extra-index-url" not in semantics
+
+    assert re.findall(r'"(git\+https://[^\"]+)"', semantics) == [
+        command.split('"', 1)[1].rsplit('"', 1)[0] for command in installs
+    ]
+    for version in ("0.2.1", "0.2.1", "0.1.0"):
+        assert version in semantics
+    assert 'Path(os.environ["GITHUB_WORKSPACE"]).resolve()' in semantics
+    assert "Path(sys.prefix).resolve()" in semantics
+    assert "not origin.is_relative_to(workspace)" in semantics
+    assert "origin.is_relative_to(environment)" in semantics
+    assert 'distribution.read_text("direct_url.json")' in semantics
+    assert 'set(direct_url) == {"url", "vcs_info"}' in semantics
+    assert 'direct_url["url"] == repository' in semantics
+    assert 'direct_url["vcs_info"] == {' in semantics
+    assert '"requested_revision": commit' in semantics
+    assert '"commit_id": commit' in semantics
+
+
+def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
+    matrix = _repository_text("DEPENDENCY_MATRIX.md")
+    assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
+    assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
+    for commit in (
+        "37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa",
+        "e676783256833f0c17e8ff6536f0f73365998928",
+        "4626887667f4c251479d26f321b9e73b046a2783",
+    ):
+        assert commit in matrix
+    assert "Source-CI definition implemented; installed-wheel qualification `UNRUN`" in matrix
+    assert (
+        "installed-wheel qualification `BLOCKED` on accepted hash-pinned owner artifacts, "
+        "then `UNRUN`"
+    ) in matrix
+    assert "These are source-cell inputs, not built-wheel, resolver, or release evidence." in matrix
+
+
+def test_semantic_consumer_tests_gate_optional_owners_locally() -> None:
+    expected_functions = {
+        "tests/test_calculix.py": ("_semantic_types",),
+        "tests/test_sesam.py": (
+            "test_semantics_resolves_a_neutral_mesh_and_records",
+            "test_semantics_resolves_explicit_shell_local_axes",
+            "test_semantics_maps_gunivec_to_beam_orientation",
+        ),
+        "tests/test_formats_and_cli.py": (
+            "test_summary_resolves_the_document_into_neutral_records",
+        ),
+        "tests/test_gui.py": ("test_loading_a_fem_file_fills_every_panel",),
+    }
+
+    for relative, functions in expected_functions.items():
+        tree = ast.parse(_repository_text(relative), filename=relative)
+        top_level_imports = {
+            alias.name.split(".")[0]
+            for node in tree.body
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        top_level_imports |= {
+            node.module.split(".")[0]
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert not ({"anymesher", "anymaterial"} & top_level_imports)
+        for function_name in functions:
+            function = _function(tree, function_name)
+            assert _importorskip_modules(function) == {"anymesher", "anymaterial"}
