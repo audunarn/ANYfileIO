@@ -46,7 +46,7 @@ FORBIDDEN = frozenset(
 # so that importing the package never requires an optional dependency.
 OPTIONAL_IMPORT_EXCEPTIONS: dict[str, frozenset[str]] = {}
 
-CAD_NEUTRAL_MODULES = ("cad.py", "cad_backend.py", "cad_operations.py", "formats.py")
+CAD_NEUTRAL_MODULES = ("cad.py", "cad_backend.py", "cad_operations.py", "cad_artifact.py", "formats.py")
 CAD_FORBIDDEN_IMPORTS = frozenset({"OCP", "cadquery", "anyfileio_occt", "anygeometry"})
 
 

@@ -78,6 +78,7 @@ from .cad import (
 )
 from .cad_backend import BackendStatus, backend_status
 from .cad_operations import read_cad, tessellate_cad, write_cad
+from .cad_artifact import open_preview_artifact, write_preview_artifact
 from .formats import (
     FormatDescriptor,
     READERS,
@@ -186,6 +187,7 @@ __all__ = [
     "raise_if_errors",
     "read",
     "read_cad",
+    "open_preview_artifact",
     "read_raw_records",
     "read_sesam_fem_document",
     "read_sesam_semantics",
@@ -199,5 +201,6 @@ __all__ = [
     "validate_sesam_fem_document",
     "write_deck",
     "write_cad",
+    "write_preview_artifact",
     "write_sesam_fem_document",
 ]
