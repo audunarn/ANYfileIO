@@ -158,6 +158,8 @@ class FakeBackend:
         self.raise_read: Exception | None = None
         self.raise_translate: Exception | None = None
         self.report_corruption: str | None = None
+        self.wrong_owner = False
+        self.returned_documents: list[CadDocument] = []
 
     def read(
         self,
@@ -181,15 +183,17 @@ class FakeBackend:
         snapshot = self.attach_unexpected if self.attach_unexpected is not None else (source_snapshot if options.retain_source else None)
         state = object() if options.mode == "live" else None
         meshes = (_mesh(manifest),) if tessellation_options is not None else ()
-        return CadDocument._from_backend(
+        document = CadDocument._from_backend(
             manifest=manifest,
             tessellation_options=tessellation_options,
             prototype_meshes=meshes,
             source_snapshot=snapshot,
             backend_state=state,
             close_backend_state=self.closed.append if state is not None else None,
-            owner_thread_id=threading.get_ident() if state is not None else None,
+            owner_thread_id=(threading.get_ident() + 1 if self.wrong_owner else threading.get_ident()) if state is not None else None,
         )
+        self.returned_documents.append(document)
+        return document
 
     def tessellate(self, document: CadDocument, *, options: CadTessellationOptions, cancellation):
         self.tessellate_calls.append((document, options, cancellation))
@@ -397,6 +401,45 @@ def test_read_unretained_and_provider_failure_remove_only_owned_spool(monkeypatc
         operations.read_cad(source, options=CadReadOptions("manifest_only", False))
     assert not backend.read_calls[-1][0].exists() and source.exists()
 
+    backend.raise_read = None
+    held_spool = None
+
+    def replace_spool_then_fail(
+        source_snapshot,
+        *,
+        source_sha256,
+        source_name,
+        options,
+        tessellation_options,
+        cancellation,
+    ):
+        nonlocal held_spool
+        backend.read_calls.append(
+            (source_snapshot, source_sha256, source_name, options, tessellation_options, cancellation)
+        )
+        held_spool = source_snapshot.with_name(f"{source_snapshot.name}.held")
+        source_snapshot.replace(held_spool)
+        source_snapshot.write_bytes(b"replacement-owned-by-someone-else")
+        raise RuntimeError("provider replaced the spool")
+
+    monkeypatch.setattr(backend, "read", replace_spool_then_fail)
+    with pytest.raises(CadOperationError) as caught:
+        operations.read_cad(source, options=CadReadOptions("manifest_only", False))
+    replacement = backend.read_calls[-1][0]
+    try:
+        assert isinstance(caught.value.__cause__, RuntimeError)
+        assert replacement.read_bytes() == b"replacement-owned-by-someone-else"
+        assert held_spool is not None and held_spool.read_bytes() == b"part"
+        assert any(
+            "cleanup also failed:" in note and "identity changed; refusing removal" in note
+            for note in getattr(caught.value, "__notes__", ())
+        )
+    finally:
+        replacement.unlink(missing_ok=True)
+        if held_spool is not None:
+            held_spool.unlink(missing_ok=True)
+    assert source.read_bytes() == b"part"
+
 
 def test_read_rejects_manifest_or_attached_source_mismatch(monkeypatch, tmp_path) -> None:
     source = tmp_path / "part.step"
@@ -415,6 +458,20 @@ def test_read_rejects_manifest_or_attached_source_mismatch(monkeypatch, tmp_path
         operations.read_cad(source, options=CadReadOptions("manifest_only", True))
     assert caller_owned.read_bytes() == b"must-survive"
 
+    backend.attach_unexpected = None
+    backend.wrong_owner = True
+    with pytest.raises(CadOperationError) as caught:
+        operations.read_cad(source, options=CadReadOptions("live", False))
+    assert "live provider session is not owned by the caller thread" in str(caught.value)
+    assert any(
+        "provider-session cleanup also failed:" in note and "cad.session.wrong_thread" in note
+        for note in getattr(caught.value, "__notes__", ())
+    )
+    leaked = backend.returned_documents[-1]
+    leaked._owner_thread_id = threading.get_ident()
+    leaked.close()
+    assert source.read_bytes() == b"part"
+
 
 def test_live_tessellation_core_binds_provider_meshes(monkeypatch, tmp_path) -> None:
     source = tmp_path / "part.step"
@@ -426,6 +483,13 @@ def test_live_tessellation_core_binds_provider_meshes(monkeypatch, tmp_path) -> 
     result = operations.tessellate_cad(document, options=options)
     assert result.options is options and result.prototype_meshes[0].prototype_id == 1
     assert backend.tessellate_calls[0][0] is document
+    monkeypatch.setattr(
+        backend,
+        "tessellate",
+        lambda operation_document, *, options, cancellation: [_mesh(operation_document.manifest)],
+    )
+    with pytest.raises(CadOperationError, match="must be a tuple"):
+        operations.tessellate_cad(document, options=options)
     document.close()
 
 
@@ -456,6 +520,25 @@ def test_tessellation_rejects_unavailable_or_mismatched_reopen(monkeypatch, tmp_
         operations.tessellate_cad(mismatched)
     assert caught.value.code == "cad.source.reopen_mismatch"
     mismatched.release_source()
+
+    backend.bad_reopen = False
+    drifted_source = tmp_path / "drifted.step"
+    drifted_source.write_bytes(b"part")
+    drifted = _closed_document(drifted_source)
+
+    def drift_then_fail(_document, *, options, cancellation):
+        backend.read_calls[-1][0].write_bytes(b"changed")
+        raise RuntimeError("tessellation failed")
+
+    monkeypatch.setattr(backend, "tessellate", drift_then_fail)
+    with pytest.raises(CadOperationError, match="provider tessellation failed") as caught:
+        operations.tessellate_cad(drifted)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert any(
+        "retained-source verification also failed:" in note and "cad.source.reopen_mismatch" in note
+        for note in getattr(caught.value, "__notes__", ())
+    )
+    drifted.release_source()
 
 
 def test_preserve_is_provider_free_atomic_and_byte_identical(monkeypatch, tmp_path) -> None:
@@ -554,6 +637,50 @@ def test_write_failure_or_cancellation_preserves_existing_destination(monkeypatc
     with pytest.raises(TypeError):
         operations.write_cad(object(), ExplosivePath(), options=object())  # type: ignore[arg-type]
 
+    events = []
+    real_fstat = operations.os.fstat
+    real_close = operations.os.close
+
+    def tracked_fstat(descriptor):
+        events.append(("fstat", descriptor))
+        return real_fstat(descriptor)
+
+    def tracked_close(descriptor):
+        events.append(("close", descriptor))
+        return real_close(descriptor)
+
+    with monkeypatch.context() as local:
+        local.setattr(operations.os, "fstat", tracked_fstat)
+        local.setattr(operations.os, "close", tracked_close)
+        probe, probe_identity = operations._create_output_temporary(tmp_path / "probe.step")
+    assert events[0][0] == "fstat" and events[1] == ("close", events[0][1])
+    operations._unlink_owned(probe, probe_identity)
+
+    created_on_failure = []
+    closed_on_failure = []
+    real_mkstemp = operations.tempfile.mkstemp
+
+    def tracked_mkstemp(*args, **kwargs):
+        result = real_mkstemp(*args, **kwargs)
+        created_on_failure.append(pathlib.Path(result[1]))
+        return result
+
+    def failing_fstat(_descriptor):
+        raise OSError("fstat failed")
+
+    def close_after_fstat_failure(descriptor):
+        closed_on_failure.append(descriptor)
+        return real_close(descriptor)
+
+    with monkeypatch.context() as local:
+        local.setattr(operations.tempfile, "mkstemp", tracked_mkstemp)
+        local.setattr(operations.os, "fstat", failing_fstat)
+        local.setattr(operations.os, "close", close_after_fstat_failure)
+        with pytest.raises(CadOperationError, match="identity could not be recorded"):
+            operations._create_output_temporary(tmp_path / "probe-failure.step")
+    assert closed_on_failure and created_on_failure
+    created_on_failure[0].unlink(missing_ok=True)
+
     source = tmp_path / "part.step"
     source.write_bytes(b"part")
     destination = tmp_path / "translated.step"
@@ -584,4 +711,36 @@ def test_write_failure_or_cancellation_preserves_existing_destination(monkeypatc
         operations.write_cad(document, destination, options=CadWriteOptions("translate"))
     assert destination.read_bytes() == b"old"
     assert not list(tmp_path.glob(".translated.anyfileio-*.step"))
+
+    backend.raise_translate = None
+    real_validate_report = operations._validate_translation_report
+    replacement = None
+    held_output = None
+
+    def substitute_after_report(*args, **kwargs):
+        nonlocal replacement, held_output
+        report = real_validate_report(*args, **kwargs)
+        replacement = backend.translate_calls[-1][1]
+        held_output = replacement.with_name(f"{replacement.name}.held")
+        replacement.replace(held_output)
+        replacement.write_bytes(b"replacement-owned-by-someone-else")
+        return report
+
+    with monkeypatch.context() as local:
+        local.setattr(operations, "_validate_translation_report", substitute_after_report)
+        with pytest.raises(CadOperationError, match="provider replaced the core-owned output temporary") as caught:
+            operations.write_cad(document, destination, options=CadWriteOptions("translate"))
+    try:
+        assert destination.read_bytes() == b"old"
+        assert replacement is not None and replacement.read_bytes() == b"replacement-owned-by-someone-else"
+        assert held_output is not None and held_output.read_bytes() == b"translated-step"
+        assert any(
+            "cleanup also failed:" in note and "identity changed; refusing removal" in note
+            for note in getattr(caught.value, "__notes__", ())
+        )
+    finally:
+        if replacement is not None:
+            replacement.unlink(missing_ok=True)
+        if held_output is not None:
+            held_output.unlink(missing_ok=True)
     document.close()

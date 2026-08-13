@@ -680,9 +680,26 @@ def _create_output_temporary(destination: pathlib.Path) -> tuple[pathlib.Path, t
         suffix=destination.suffix.lower(),
         dir=parent,
     )
-    os.close(descriptor)
     temporary = pathlib.Path(name)
-    identity = _file_identity(temporary.stat())
+    identity_error: BaseException | None = None
+    try:
+        identity = _file_identity(os.fstat(descriptor))
+    except BaseException as error:
+        identity_error = error
+    if identity_error is not None:
+        try:
+            os.close(descriptor)
+        except OSError as close_error:
+            identity_error.add_note(f"temporary descriptor close also failed: {close_error}")
+        if isinstance(identity_error, Exception):
+            raise CadOperationError("core-owned output identity could not be recorded") from identity_error
+        raise identity_error
+    try:
+        os.close(descriptor)
+    except OSError as close_error:
+        failure = CadOperationError("core-owned output temporary handle could not be closed")
+        _cleanup_after_failure(temporary, identity, failure)
+        raise failure from close_error
     return temporary, identity
 
 
