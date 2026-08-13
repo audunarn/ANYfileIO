@@ -725,6 +725,7 @@ def _manifest_payload(
     source_identity: str,
     mesh_payloads: Sequence[Mapping[str, Any]],
     members: Mapping[str, bytes],
+    cancellation: CancellationCheck = None,
 ) -> dict[str, Any]:
     return {
         "schema": _SCHEMA_NAME,
@@ -741,8 +742,24 @@ def _manifest_payload(
         "cache_key": _cache_payload(manifest, options, source_identity),
         "document": _document_payload(manifest),
         "meshes": list(mesh_payloads),
-        "entries": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(members.items())},
+        "entries": {
+            name: _digest_bytes(data, cancellation)
+            for name, data in sorted(members.items())
+        },
     }
+
+
+def _digest_bytes(data: bytes, cancellation: CancellationCheck = None) -> str:
+    digest = hashlib.sha256()
+    view = memoryview(data)
+    try:
+        for offset in range(0, len(view), _BUFFER_SIZE):
+            _check_cancelled(cancellation)
+            digest.update(view[offset : offset + _BUFFER_SIZE])
+        _check_cancelled(cancellation)
+        return digest.hexdigest()
+    finally:
+        view.release()
 
 
 def _preflight_members(members: Mapping[str, bytes], manifest_bytes: bytes) -> None:
@@ -1233,6 +1250,90 @@ def _expected_inventory(meshes: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     return ("manifest.json", *sorted(names))
 
 
+def _validated_entries(value: Any, names: Sequence[str]) -> dict[str, str]:
+    expected = set(names[1:])
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise _artifact_error("manifest entries do not exactly cover non-manifest members")
+    entries: dict[str, str] = {}
+    for name, digest in value.items():
+        if (
+            type(digest) is not str
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise _artifact_error("manifest entry digest is not lower-case SHA-256")
+        entries[name] = digest
+    return entries
+
+
+def _validate_mesh_payloads(
+    meshes: Sequence[Mapping[str, Any]],
+    manifest: CadManifest,
+) -> None:
+    prototypes = {prototype.id: prototype for prototype in manifest.prototypes}
+    shapes_by_prototype = {
+        prototype.id: {
+            shape.cad_ref
+            for shape in manifest.shapes
+            if shape.prototype_id == prototype.id
+        }
+        for prototype in manifest.prototypes
+    }
+    if tuple(prototypes) != tuple(mesh["prototype_id"] for mesh in meshes):
+        raise _artifact_error("mesh descriptors do not cover every prototype")
+    for mesh in meshes:
+        prototype_id = mesh["prototype_id"]
+        prototype = prototypes[prototype_id]
+        expected_bounds = (
+            None
+            if prototype.local_bounds_m is None
+            else list(prototype.local_bounds_m)
+        )
+        _require_strict_projection(
+            mesh["local_bounds_m"],
+            expected_bounds,
+            "mesh bounds",
+        )
+        precision = mesh["precision"]
+        if type(precision) is not str or precision not in {"float32", "float64"}:
+            raise _artifact_error("mesh precision is invalid")
+
+        diagnostics_raw = _as_tuple(mesh["diagnostics"], "mesh diagnostics")
+        diagnostics = tuple(
+            _diagnostic_from_payload(item) for item in diagnostics_raw
+        )
+        _require_strict_projection(
+            list(diagnostics_raw),
+            [_diagnostic_payload(item) for item in diagnostics],
+            "mesh diagnostics",
+        )
+        if any(
+            entity.document_id != manifest.document_id
+            for diagnostic in diagnostics
+            for entity in diagnostic.entities
+        ):
+            raise _artifact_error("mesh diagnostic belongs to another document")
+
+        known = shapes_by_prototype[prototype_id]
+        for field_name, kind in (("face_owners", "face"), ("edge_owners", "edge")):
+            raw_owners = _as_tuple(mesh[field_name], field_name.replace("_", " "))
+            owners = tuple(_entity_from_payload(item) for item in raw_owners)
+            _require_strict_projection(
+                list(raw_owners),
+                [_entity_payload(item) for item in owners],
+                field_name.replace("_", " "),
+            )
+            if (
+                len(set(owners)) != len(owners)
+                or any(owner.kind != kind for owner in owners)
+                or any(owner.document_id != manifest.document_id for owner in owners)
+                or any(owner not in known for owner in owners)
+            ):
+                raise _artifact_error(
+                    "mesh owner is not a manifest shape in the same prototype"
+                )
+
+
 def _validate_repeated_payload(payload: Mapping[str, Any], manifest: CadManifest, options: CadTessellationOptions) -> None:
     for field_name, expected in (("version", _SCHEMA_VERSION), ("protocol_version", _PROTOCOL_VERSION)):
         _require_exact_int(payload[field_name], expected, field_name)
@@ -1318,9 +1419,7 @@ def _read_artifact_metadata_view(
         mesh_payloads = _as_tuple(payload["meshes"], "meshes")
         if names != _expected_inventory(mesh_payloads):
             raise _artifact_error("archive inventory disagrees with the manifest")
-        entries = payload["entries"]
-        if not isinstance(entries, Mapping) or set(entries) != set(names[1:]):
-            raise _artifact_error("manifest entries do not exactly cover non-manifest members")
+        entries = _validated_entries(payload["entries"], names)
         document_payload = _require_keys(payload["document"], (
             "document_id", "source_sha256", "source_name", "source_format", "source_length_unit", "source_to_metre_scale",
             "internal_length_unit", "root_occurrence_ids", "prototypes", "occurrences", "shapes", "world_bounds_m",
@@ -1365,9 +1464,8 @@ def _read_artifact_metadata_view(
             "binding_version", "occt_version", "source_identity", "artifact_schema", "artifact_version"), "cache_key")
         options = _tessellation_options_from_payload(cache_payload["tessellation_options"])
         _validate_repeated_payload(payload, manifest, options)
-        if tuple(item.id for item in manifest.prototypes) != tuple(item["prototype_id"] for item in mesh_payloads):
-            raise _artifact_error("mesh descriptors do not cover every prototype")
-        return _OpenedArtifact(path, manifest_bytes, payload, manifest, options, names, dict(entries), tuple(mesh_payloads))
+        _validate_mesh_payloads(mesh_payloads, manifest)
+        return _OpenedArtifact(path, manifest_bytes, payload, manifest, options, names, entries, tuple(mesh_payloads))
 
 
 def _open_artifact_metadata(
@@ -1787,7 +1885,14 @@ def write_preview_artifact(
         mesh_members, payload = _mesh_members(mesh, cancellation)
         members.update(mesh_members)
         mesh_payloads.append(payload)
-    payload = _manifest_payload(document.manifest, result.options, result.source_identity, mesh_payloads, members)
+    payload = _manifest_payload(
+        document.manifest,
+        result.options,
+        result.source_identity,
+        mesh_payloads,
+        members,
+        cancellation,
+    )
     manifest_bytes = _canonical_json(payload)
     _preflight_members(members, manifest_bytes)
     try:

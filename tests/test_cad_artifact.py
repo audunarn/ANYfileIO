@@ -335,6 +335,46 @@ def test_open_is_metadata_eager_and_prototype_lazy_once(monkeypatch, tmp_path) -
     assert reopened.tessellation is reopened.tessellation
     assert calls == 1
 
+    prototype_preflights = []
+    original_preflight = artifacts._preflight_npy_member
+    def recording_preflight(archive, info):
+        if info.filename.startswith("prototypes/"):
+            prototype_preflights.append(info.filename)
+        return original_preflight(archive, info)
+    monkeypatch.setattr(artifacts, "_preflight_npy_member", recording_preflight)
+
+    other_document_id = _document_id(hashlib.sha256(b"other").hexdigest())
+    diagnostic = {
+        "code": "mesh.warning",
+        "severity": "warning",
+        "message": "warning",
+        "entities": [
+            {"document_id": other_document_id, "kind": "face", "local_id": 1}
+        ],
+        "details": {},
+    }
+    mutations = (
+        lambda mesh: mesh["local_bounds_m"].__setitem__(0, 0),
+        lambda mesh: mesh["local_bounds_m"].__setitem__(3, 2.0),
+        lambda mesh: mesh.__setitem__("precision", "float16"),
+        lambda mesh: mesh.__setitem__("diagnostics", [diagnostic]),
+        lambda mesh: mesh["face_owners"][0].__setitem__("kind", "edge"),
+        lambda mesh: mesh["face_owners"][0].__setitem__("local_id", 999),
+    )
+    for index, mutation in enumerate(mutations):
+        malformed = tmp_path / f"eager-mesh-{index}.zip"
+        malformed.write_bytes(target.read_bytes())
+        def mutate(members, selected=mutation):
+            payload = json.loads(members[0][1])
+            selected(payload["meshes"][0])
+            members[0] = ("manifest.json", artifacts._canonical_json(payload))
+        _rewrite(malformed, mutate)
+        prototype_preflights.clear()
+        with pytest.raises(CadArtifactError):
+            artifacts.open_preview_artifact(malformed)
+        assert prototype_preflights == []
+        assert calls == 1
+
 
 def test_lazy_failure_is_cached_without_partial_publication(monkeypatch, tmp_path) -> None:
     _document_value, target, _digest = _write(tmp_path)
@@ -493,6 +533,17 @@ def test_reader_rejects_zip_metadata_descriptor_zip64_and_trailing_data(monkeypa
 
 
 def test_reader_rejects_entry_hash_and_npy_corruption(tmp_path) -> None:
+    entry_targets = []
+    for index, replacement in enumerate(("0" * 63, "A" * 64, "g" * 64, 1)):
+        target = _fresh_target(tmp_path, f"entry-digest-{index}.zip")
+        def corrupt_entry(members, selected=replacement):
+            payload = json.loads(members[0][1])
+            first_name = next(iter(payload["entries"]))
+            payload["entries"][first_name] = selected
+            members[0] = ("manifest.json", artifacts._canonical_json(payload))
+        _rewrite(target, corrupt_entry)
+        entry_targets.append(target)
+
     hash_target = _fresh_target(tmp_path, "hash.zip")
     def corrupt_hash(members):
         for index, (name, data) in enumerate(members):
@@ -567,7 +618,7 @@ def test_reader_rejects_entry_hash_and_npy_corruption(tmp_path) -> None:
         ),
     )
 
-    for target in (hash_target, header_target, dtype_target, shape_target, order_target):
+    for target in (*entry_targets, hash_target, header_target, dtype_target, shape_target, order_target):
         with pytest.raises(CadArtifactError):
             artifacts.open_preview_artifact(target)
     for target in (index_target, offset_target):
@@ -613,7 +664,7 @@ def test_reader_policy_limits_accept_exact_limit_and_reject_limit_plus_one(resou
     assert dict(caught.value.diagnostic.details) == {"resource": resource, "limit": limit, "observed": limit + 1}
 
 
-def test_reader_policy_preflight_is_overflow_safe_and_hashes_streaming() -> None:
+def test_reader_policy_preflight_is_overflow_safe_and_hashes_streaming(monkeypatch) -> None:
     assert artifacts._checked_product((2, 3), 6, "test") == 6
     with pytest.raises(CadArtifactError):
         artifacts._checked_product((2, 4), 7, "test")
@@ -632,6 +683,33 @@ def test_reader_policy_preflight_is_overflow_safe_and_hashes_streaming() -> None
     data, digest = artifacts._hash_stream(reader, 3, "test")
     assert data == b"abc" and digest == hashlib.sha256(b"abc").hexdigest()
     assert reader.calls and all(size != -1 for size in reader.calls)
+
+    real_sha256 = artifacts.hashlib.sha256
+    updates = []
+    class RecordingDigest:
+        def __init__(self):
+            self.inner = real_sha256()
+        def update(self, block):
+            assert isinstance(block, memoryview)
+            updates.append(len(block))
+            self.inner.update(block)
+        def hexdigest(self):
+            return self.inner.hexdigest()
+    monkeypatch.setattr(artifacts, "_BUFFER_SIZE", 4)
+    monkeypatch.setattr(artifacts.hashlib, "sha256", RecordingDigest)
+    assert artifacts._digest_bytes(b"abcdefghij") == real_sha256(b"abcdefghij").hexdigest()
+    assert updates == [4, 4, 2]
+
+    updates.clear()
+    checks = 0
+    def cancellation():
+        nonlocal checks
+        checks += 1
+        return checks == 2
+    with pytest.raises(Exception) as caught:
+        artifacts._digest_bytes(b"abcdefghij", cancellation)
+    assert getattr(caught.value, "code", None) == "cad.operation.cancelled"
+    assert updates == [4]
 
 
 def test_retained_source_is_snapshotted_hash_bound_and_releasable(monkeypatch, tmp_path) -> None:
