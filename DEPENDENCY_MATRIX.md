@@ -64,8 +64,8 @@ complete.
 
 | Distribution / extra | Target | Frozen requirements | Status |
 | --- | --- | --- | --- |
-| `ANYfileio` | `0.2.0` | `numpy>=1.26` | `FROZEN` |
-| `ANYfileio[semantics]` | `0.2.x` | `ANYmesher>=0.2,<0.3`; `ANYmaterial>=0.1,<0.2` | Family ranges `FROZEN`; delivered mesher patch floor `BLOCKED` |
+| `ANYfileio` | `0.2.0` | `numpy>=1.26` | Release metadata `FROZEN`; PyPI publication `UNRUN` |
+| Semantic source-development runtime | not a 0.2.0 extra | accepted source commits listed below | Source CI only; installed-wheel/release claim deferred |
 
 The base runtime is NumPy-only. Existing SESAM/CalculiX semantic paths load
 ANYmesher and ANYmaterial only when those operations execute. The base must not
@@ -77,26 +77,28 @@ The CAD semantic-operation acceptance range is exactly
 operation boundary and never infers compatibility from a broader
 package-install range.
 
-The canonical metadata/runtime transition is accepted at
-`1f0b5780df7f025fc786fd3db2cba9da2104fb5c`: the base requirement is exactly
-NumPy, and `ANYmesher>=0.2,<0.3` plus `ANYmaterial>=0.1,<0.2` live only in the
-`semantics` extra. Base imports are eager-free. Semantic operations lazy-load
-their owners and fail with the typed `SEM001`, `SEM002`, or `SEM003` diagnostic
-when an owner is missing, has incompatible metadata, or cannot be imported.
+The canonical lazy runtime transition is accepted at
+`1f0b5780df7f025fc786fd3db2cba9da2104fb5c`: base imports are eager-free and
+semantic operations validate their owners only when called. For the 0.2.0 PyPI
+release, the declared runtime requirement is exactly NumPy and no semantic extra
+is advertised. Semantic operations remain source-compatible for development and
+fail with typed `SEM001`, `SEM002`, or `SEM003` diagnostics when an owner is
+missing, incompatible, or cannot be imported.
 
-Source CI definitions are implemented as distinct base-only and `[semantics]`
-cells. The base cell asserts that ANYgeometry, ANYmesher, and ANYmaterial are
-absent. The semantics source cell installs these immutable inputs in order,
-each with `--no-deps`, and verifies version, source origin, and PEP 610 commit:
+Source CI definitions remain distinct base-only and semantic-development cells.
+The base cell asserts that ANYgeometry, ANYmesher, and ANYmaterial are absent.
+The semantic-development cell installs these immutable inputs in order, each
+with `--no-deps`, then installs `ANYfileio[dev]` and verifies version, source
+origin, and PEP 610 commit:
 
 1. ANYgeometry `37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa`;
 2. ANYmesh / ANYmesher `e676783256833f0c17e8ff6536f0f73365998928`;
 3. ANYmaterial `4626887667f4c251479d26f321b9e73b046a2783`.
 
 These are source-cell inputs, not built-wheel, resolver, or release evidence.
-Base installed-wheel qualification remains `UNRUN`. Semantics installed-wheel
-qualification remains `BLOCKED` on accepted hash-pinned artifacts for all
-three owners and becomes `UNRUN` only after those artifacts exist.
+Base installed-wheel qualification is a required 0.2.0 release-preparation gate.
+Semantic installed-wheel qualification is deferred until separately published,
+hash-pinned owner artifacts exist; it is not a claim of the 0.2.0 base release.
 
 ### 3.2 Heavy provider and geometry adapter
 
@@ -311,8 +313,8 @@ built-wheel isolation gate.
 
 | Environment | Required result | Status |
 | --- | --- | --- |
-| ANYfileio base only | NumPy plus core; ANYgeometry, ANYmesher, and ANYmaterial absent; import/core CAD records/artifact reopen pass | Source-CI definition implemented; installed-wheel qualification `UNRUN` |
-| ANYfileio semantics | accepted `ANYmesher>=0.2,<0.3` + `ANYmaterial>=0.1,<0.2`; lazy semantic operation succeeds | Source-CI definition implemented with the three immutable commits above; installed-wheel qualification `BLOCKED` on accepted hash-pinned owner artifacts, then `UNRUN` |
+| ANYfileio 0.2.0 base only | NumPy plus core; ANYgeometry, ANYmesher, ANYmaterial, OCP, CadQuery, and ANYfileio-occt absent; import/CLI/core CAD records/artifact reopen pass | Required before manual PyPI upload; publication remains `UNRUN` |
+| Semantic source development | three immutable owner commits above; lazy semantic operation succeeds | Source-CI evidence only; no 0.2.0 extra or installed-wheel/release claim |
 | Transitional legacy resolver | real hash-pinned ANYmesher 0.1.0 and 0.2.1 compatibility for proposed install-only `>=0.1,<0.3`; never a CAD-capability pass and never merged alone | `BLOCKED` on separate resolver-owner plan/evidence |
 | ANYfileio-occt base | core + NumPy + exact OCP wheel; no geometry | `UNRUN` |
 | ANYfileio-occt geometry | heavy base + ANYgeometry 0.2.1; no consumer | `UNRUN` |
@@ -368,11 +370,14 @@ future disjoint resolver evidence/owner commit (if accepted)
   -> protected M2 + CAD-contract diff proof
   -> integration without weakening CAD >=0.2 semantic checks
 
-accepted hash-pinned ANYgeometry / ANYmesher / ANYmaterial owner artifacts
-  -> semantics installed-wheel qualification
-
 accepted core public API + accepted lazy semantic runtime
-  -> complete ANYfileIO 0.2 qualification
+  -> remove unresolved semantic extra from 0.2.0 metadata
+  -> NumPy-only wheel/sdist and installed-artifact qualification
+  -> manual ANYfileIO 0.2.0 PyPI upload
+
+future accepted hash-pinned ANYgeometry / ANYmesher / ANYmaterial artifacts
+  -> separately registered semantics installed-wheel qualification
+  -> possible later reintroduction of a published semantic extra
 
 accepted imported-CAD heavy API + accepted ANYfem V6/native/UI handoff
   -> ANYfem owner V7 persistence/headless reference assets

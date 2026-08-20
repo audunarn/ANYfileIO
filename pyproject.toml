@@ -27,14 +27,10 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 # Records, documents, built-in formats, and CAD-neutral contracts are NumPy-only.
-# Semantic mesh/material operations are isolated in the `semantics` extra below.
+# Semantic mesh/material operations remain source-development-only in 0.2.0.
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-semantics = [
-  "ANYmesher>=0.2,<0.3",
-  "ANYmaterial>=0.1,<0.2",
-]
 # The file inspector uses tkinter from the standard library, so it adds no
 # wheel.  The extra exists so `pip install ANYfileio[gui]` is meaningful and
 # stays meaningful if that ever stops being true.

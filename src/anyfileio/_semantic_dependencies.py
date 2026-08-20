@@ -9,7 +9,10 @@ from typing import Any, Callable
 
 from .diagnostics import FemDiagnostic, SemanticDependencyError
 
-_INSTALL_HINT = 'pip install "ANYfileio[semantics]"'
+_SETUP_HINT = (
+    "semantic operations are source-development-only in ANYfileio 0.2.0; "
+    "see https://github.com/audunarn/ANYfileIO#development"
+)
 _NUMERIC_RELEASE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 
 
@@ -38,8 +41,9 @@ _cached_capabilities: _SemanticCapabilities | None = None
 def _failure(code: str, message: str, context: dict[str, Any]) -> SemanticDependencyError:
     details = {
         **context,
-        "extra": "semantics",
-        "install_hint": _INSTALL_HINT,
+        "feature": "semantics",
+        "availability": "source-development-only",
+        "setup_hint": _SETUP_HINT,
     }
     diagnostic = FemDiagnostic(code=code, message=message, context=details)
     return SemanticDependencyError(message, code=code, diagnostics=(diagnostic,))
@@ -86,7 +90,7 @@ def require_semantics() -> _SemanticCapabilities:
         ordered = sorted(missing, key=_normalised_distribution_name)
         message = (
             f"optional semantics distributions are missing: {', '.join(ordered)}; "
-            f"install with {_INSTALL_HINT}"
+            f"{_SETUP_HINT}"
         )
         raise _failure("SEM001", message, {"missing_distributions": tuple(ordered)})
 
@@ -97,7 +101,7 @@ def require_semantics() -> _SemanticCapabilities:
             required = _required_range(lower, upper)
             message = (
                 f"optional semantics distribution {distribution} has version {observed!r}; "
-                f"required {required}; install with {_INSTALL_HINT}"
+                f"required {required}; {_SETUP_HINT}"
             )
             raise _failure(
                 "SEM002",
@@ -118,7 +122,7 @@ def require_semantics() -> _SemanticCapabilities:
             message = (
                 f"optional semantics module {module_name!r} could not provide "
                 f"{', '.join(symbols)}: {type(exc).__name__}: {exc}; "
-                f"install with {_INSTALL_HINT}"
+                f"{_SETUP_HINT}"
             )
             raise _failure(
                 "SEM003",

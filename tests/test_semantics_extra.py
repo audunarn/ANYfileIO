@@ -18,7 +18,10 @@ from anyfileio.calculix.deck import DeckModel, DeckSupport, write_deck
 from anyfileio.sesam.semantics import SesamSemantics, SesamSupport, read_sesam_semantics
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
-INSTALL_HINT = 'pip install "ANYfileio[semantics]"'
+SETUP_HINT = (
+    "semantic operations are source-development-only in ANYfileio 0.2.0; "
+    "see https://github.com/audunarn/ANYfileIO#development"
+)
 
 
 class DummyMesh:
@@ -75,9 +78,10 @@ def _assert_dependency_error(error: SemanticDependencyError, code: str) -> dict[
     assert diagnostic.code == code
     assert diagnostic.severity == "error"
     assert diagnostic.context is not None
-    assert diagnostic.context["extra"] == "semantics"
-    assert diagnostic.context["install_hint"] == INSTALL_HINT
-    assert INSTALL_HINT in str(error)
+    assert diagnostic.context["feature"] == "semantics"
+    assert diagnostic.context["availability"] == "source-development-only"
+    assert diagnostic.context["setup_hint"] == SETUP_HINT
+    assert SETUP_HINT in str(error)
     return dict(diagnostic.context)
 
 
@@ -258,10 +262,10 @@ def test_cli_summary_reports_the_typed_missing_extra(
     assert main(["summary", "must-not-be-read.FEM"]) == 2
     captured = capsys.readouterr()
     assert "SEM001" in captured.err
-    assert INSTALL_HINT in captured.err
+    assert SETUP_HINT in captured.err
 
 
-def test_diagnostics_have_exact_codes_context_and_install_hint(
+def test_diagnostics_have_exact_codes_context_and_source_setup_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_versions(monkeypatch, {})

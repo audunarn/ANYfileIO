@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-08-20
 
 Added:
 
@@ -8,11 +8,15 @@ Added:
   CLI, and accepted CAD-neutral records/discovery import without ANYmesher or
   ANYmaterial. Those accepted CAD exports remain available from the package
   facade.
-- **Optional semantic runtime.** `ANYfileio[semantics]` carries exact
-  ANYmesher 0.2.x and ANYmaterial 0.1.x ranges. SESAM semantic materialization
-  and CalculiX deck writing load them on demand and report typed `SEM001`,
-  `SEM002`, or `SEM003` failures with the install hint when unavailable or
-  incompatible.
+- **Source-development semantic runtime.** SESAM semantic materialization and
+  CalculiX deck writing retain their public APIs and lazy owner validation, but
+  0.2.0 does not advertise a PyPI `semantics` extra. Development checkouts use
+  the accepted ANYgeometry, ANYmesher, and ANYmaterial sources explicitly;
+  missing or incompatible owners report typed `SEM001`, `SEM002`, or `SEM003`
+  failures with a source-setup hint.
+- **Truthful native-CAD boundary.** CAD-neutral records, discovery, orchestration,
+  and preview artifacts are included. No native OCCT provider or live CAD
+  capability is published or advertised by this release.
 - **Embeddable inspection.** `open_inspector` opens the file inspector in a
   host application's existing Tk event loop.
 - **Verification-safe CalculiX decks.** The neutral writer now defines the

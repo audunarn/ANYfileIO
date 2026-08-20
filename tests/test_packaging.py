@@ -96,11 +96,10 @@ def test_base_dependencies_are_numpy_only() -> None:
     assert _base_dependencies() == ("numpy>=1.26",)
 
 
-def test_semantics_extra_has_exact_family_ranges() -> None:
-    assert _extra_dependencies("semantics") == (
-        "ANYmesher>=0.2,<0.3",
-        "ANYmaterial>=0.1,<0.2",
-    )
+def test_release_does_not_advertise_the_source_only_semantics_runtime() -> None:
+    extras = _pyproject()["project"]["optional-dependencies"]
+    assert set(extras) == {"gui", "dev"}
+    assert _extra_dependencies("semantics") == ()
 
 
 def test_distribution_name_does_not_collide_with_the_async_library() -> None:
@@ -128,7 +127,9 @@ def test_allowed_third_party_imports_are_declared_dependencies() -> None:
     for extra in OPTIONAL_IMPORT_EXCEPTIONS.values():
         permitted |= set(extra)
     undeclared = sorted(
-        name for name in permitted if name.lower().replace("_", "-") not in declared
+        name
+        for name in permitted - set(SEMANTIC_IMPORTS)
+        if name.lower().replace("_", "-") not in declared
     )
     assert not undeclared, (
         "the layering allowlist permits imports that pyproject.toml does not "
@@ -136,10 +137,11 @@ def test_allowed_third_party_imports_are_declared_dependencies() -> None:
     )
 
 
-def test_optional_runtime_imports_are_declared_in_the_matching_extra() -> None:
-    declared = _requirement_names(_extra_dependencies("semantics"))
+def test_semantic_runtime_imports_are_source_only() -> None:
+    declared = _declared_dependencies()
     expected = {name.lower().replace("_", "-") for name in SEMANTIC_IMPORTS}
-    assert declared == expected
+    assert not (declared & expected)
+    assert expected == {"anymesher", "anymaterial"}
 
 
 def test_run_gui_bootstraps_without_semantic_sibling_paths() -> None:
@@ -199,7 +201,8 @@ def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     )
     positions = [semantics.index(command) for command in installs]
     assert positions == sorted(positions)
-    assert 'python -m pip install -e ".[dev,semantics]"' in semantics
+    assert 'python -m pip install -e ".[dev]"' in semantics
+    assert "[dev,semantics]" not in semantics
     assert "--index" not in semantics
     assert "--extra-index-url" not in semantics
 
@@ -230,12 +233,39 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
         "4626887667f4c251479d26f321b9e73b046a2783",
     ):
         assert commit in matrix
-    assert "Source-CI definition implemented; installed-wheel qualification `UNRUN`" in matrix
-    assert (
-        "installed-wheel qualification `BLOCKED` on accepted hash-pinned owner artifacts, "
-        "then `UNRUN`"
-    ) in matrix
+    assert "Release metadata `FROZEN`; PyPI publication `UNRUN`" in matrix
+    assert "Source CI only; installed-wheel/release claim deferred" in matrix
+    assert "publication remains `UNRUN`" in matrix
     assert "These are source-cell inputs, not built-wheel, resolver, or release evidence." in matrix
+
+
+def test_release_workflow_builds_but_cannot_publish() -> None:
+    workflow = _repository_text(".github/workflows/publish.yml")
+    assert "workflow_dispatch:" in workflow
+    assert "release:" not in workflow
+    assert "id-token" not in workflow
+    assert "gh-action-pypi-publish" not in workflow
+    assert "upload.pypi.org" not in workflow
+    assert "test.pypi.org" not in workflow
+    assert "refs/heads/main" in workflow
+    assert "expected release version 0.2.0" in workflow
+    assert "anyfileio-{version}-py3-none-any.whl" in workflow
+    assert "anyfileio-{version}.tar.gz" in workflow
+    assert "unexpected runtime requirements" in workflow
+    assert "wheel metadata contains a deferred owner/provider" in workflow
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in workflow
+    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
+
+
+def test_public_release_claims_are_numpy_only() -> None:
+    readme = _repository_text("README.md")
+    changelog = _repository_text("CHANGELOG.md")
+    assert "ANYfileio[semantics]" not in readme
+    assert "ANYfileio[semantics]" not in changelog
+    assert "## 0.2.0 - 2026-08-20" in changelog
+    assert "does not publish the semantic mesh/material owners" in readme
+    assert "No native OCCT provider" in changelog
 
 
 def test_semantic_consumer_tests_gate_optional_owners_locally() -> None:

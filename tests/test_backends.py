@@ -238,7 +238,10 @@ def test_missing_backend_error_has_exact_code_and_install_hint(monkeypatch) -> N
     with pytest.raises(BackendUnavailableError) as caught:
         _load_backend()
     assert caught.value.code == "cad.backend.missing"
-    assert caught.value.diagnostic.details["install_hint"] == 'pip install "ANYfileio-occt"'
+    assert caught.value.diagnostic.details["install_hint"] == (
+        "native CAD operations are not included in the ANYfileio 0.2.0 PyPI release; "
+        "see https://github.com/audunarn/ANYfileIO#development"
+    )
 
 
 def test_broken_provider_does_not_break_builtin_reader(monkeypatch, tmp_path) -> None:

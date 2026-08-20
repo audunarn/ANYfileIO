@@ -26,7 +26,10 @@ ENTRY_POINT_TARGET = "anyfileio_occt.backend:get_backend"
 BACKEND_ID = "occt"
 CAD_BACKEND_PROTOCOL_VERSION = 1
 BACKEND_COMPATIBILITY_VERSION = 1
-INSTALL_HINT = 'pip install "ANYfileio-occt"'
+INSTALL_HINT = (
+    "native CAD operations are not included in the ANYfileio 0.2.0 PyPI release; "
+    "see https://github.com/audunarn/ANYfileIO#development"
+)
 
 BackendState = Literal["missing", "discovered", "duplicate", "ready", "broken", "incompatible"]
 

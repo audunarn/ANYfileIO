@@ -62,7 +62,7 @@ jobs:
       - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa"
       - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e676783256833f0c17e8ff6536f0f73365998928"
       - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@4626887667f4c251479d26f321b9e73b046a2783"
-      - run: python -m pip install -e ".[dev,semantics]"
+      - run: python -m pip install -e ".[dev]"
       - name: Verify immutable semantic owners
         shell: python
         run: |
