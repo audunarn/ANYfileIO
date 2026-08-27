@@ -42,6 +42,7 @@ from .document import (
 from .schema import DOF_NAMES, get_element_spec
 
 __all__ = [
+    "ShellImportAuthority",
     "SesamSemantics",
     "SesamSupport",
     "beam_orientation",
@@ -82,6 +83,20 @@ class SesamSupport:
         return len(self.dofs) == len(DOF_NAMES)
 
 
+@dataclass(frozen=True)
+class ShellImportAuthority:
+    """Physical shell authority preserved without selecting solver mechanics."""
+
+    node_count: int
+    formulation_id: Optional[str]
+    physical_owner_normal: Tuple[float, float, float]
+    normal_source: str
+
+    @property
+    def requires_legacy_s3_migration(self) -> bool:
+        return self.node_count == 3 and self.formulation_id is None
+
+
 @dataclass
 class SesamSemantics:
     """A SESAM document resolved into neutral records.
@@ -99,6 +114,7 @@ class SesamSemantics:
     section_of_element: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     type_code_of_element: Dict[int, int] = field(default_factory=dict)
     local_axes_of_element: Dict[int, Dict[str, Tuple[float, float, float]]] = field(default_factory=dict)
+    shell_authority_of_element: Dict[int, ShellImportAuthority] = field(default_factory=dict)
     supports: Tuple[SesamSupport, ...] = ()
     pressure_of_element: Dict[int, float] = field(default_factory=dict)
     gravity: Optional[Tuple[float, float, float]] = None
@@ -124,6 +140,16 @@ class SesamSemantics:
             "supports": len(self.supports),
             "pressure_loads": len(self.pressure_of_element),
             "gravity": list(self.gravity) if self.gravity else None,
+            "shell_authority": {
+                str(element_id): {
+                    "formulation_id": authority.formulation_id,
+                    "node_count": authority.node_count,
+                    "normal_source": authority.normal_source,
+                    "physical_owner_normal": list(authority.physical_owner_normal),
+                    "requires_legacy_s3_migration": authority.requires_legacy_s3_migration,
+                }
+                for element_id, authority in sorted(self.shell_authority_of_element.items())
+            },
             "element_count_by_type": {
                 str(code): count for code, count in sorted(self.element_count_by_type.items())
             },
@@ -344,6 +370,35 @@ def _install_elements(
             axes = shell_local_axes(document, element)
             if axes is not None:
                 semantics.local_axes_of_element[element.element_id] = axes
+                owner_normal = axes["z"]
+                normal_source = "sesam_local_axis_z"
+            else:
+                first, second, third = (
+                    np.asarray(semantics.mesh.nodes[node_id], dtype=float)
+                    for node_id in connectivity[:3]
+                )
+                normal = np.cross(second - first, third - first)
+                length = float(np.linalg.norm(normal))
+                if length <= 1.0e-12:
+                    diagnostics.append(
+                        FemDiagnostic(
+                            "FEM125",
+                            f"shell element {element.element_id} has no physical owner normal",
+                            context={"element_id": element.element_id},
+                        )
+                    )
+                    continue
+                owner_normal = tuple(float(value) for value in normal / length)
+                normal_source = "directed_connectivity"
+            # Neutral SESAM records contain no ANYsolver formulation ID.  Keep
+            # that absence explicit so historical TRI3 records migrate to the
+            # legacy route instead of inheriting a qualified default.
+            semantics.shell_authority_of_element[element.element_id] = ShellImportAuthority(
+                node_count=len(connectivity),
+                formulation_id=None,
+                physical_owner_normal=tuple(float(value) for value in owner_normal),
+                normal_source=normal_source,
+            )
             # Grouped by section, which is what the file says a plate is.  Not
             # inferred from geometry: these are the file's own groups.
             if element.section_id:

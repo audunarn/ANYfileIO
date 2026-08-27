@@ -64,8 +64,8 @@ complete.
 
 | Distribution / extra | Target | Frozen requirements | Status |
 | --- | --- | --- | --- |
-| `ANYfileio` | `0.2.0` | `numpy>=1.26` | Release metadata `FROZEN`; PyPI publication `UNRUN` |
-| Semantic source-development runtime | not a 0.2.0 extra | accepted source commits listed below | Source CI only; installed-wheel/release claim deferred |
+| `ANYfileio` | `0.2.1` | `numpy>=1.26` | Release candidate; publication `UNRUN` |
+| `ANYfileio[semantics]` | `0.2.1` | `ANYmesher>=0.3.2,<0.4`; `ANYmaterial>=0.1.1,<0.2` | Coordinated candidate; publication `UNRUN` |
 
 The base runtime is NumPy-only. Existing SESAM/CalculiX semantic paths load
 ANYmesher and ANYmaterial only when those operations execute. The base must not

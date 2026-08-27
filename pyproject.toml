@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package by that name would shadow it, so the distribution and import package
 # are `ANYfileio`/`anyfileio`.
 name = "ANYfileio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reading and writing structural finite-element interchange files: SESAM FEM/SIF and CalculiX INP/FRD/DAT"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,6 +31,10 @@ classifiers = [
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
+semantics = [
+  "ANYmesher>=0.3.2,<0.4",
+  "ANYmaterial>=0.1.1,<0.2",
+]
 # The file inspector uses tkinter from the standard library, so it adds no
 # wheel.  The extra exists so `pip install ANYfileio[gui]` is meaningful and
 # stays meaningful if that ever stops being true.
@@ -66,4 +70,6 @@ python_files = ["test_*.py"]
 pythonpath = ["src"]
 # A repository-local basetemp, because the user temp directory is not always
 # writable by the test process on Windows.  Gitignored, and pytest prunes it.
-addopts = ["-ra", "-p", "no:cacheprovider", "--basetemp=.pytest_tmp"]
+# tests/conftest.py assigns a unique, gitignored repository-local basetemp so
+# concurrent runs never fight over one Windows directory.
+addopts = ["-ra", "-p", "no:cacheprovider"]
