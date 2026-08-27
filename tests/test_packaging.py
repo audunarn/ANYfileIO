@@ -198,9 +198,9 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
 def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     semantics = _workflow_jobs()["semantics"]
     installs = (
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e676783256833f0c17e8ff6536f0f73365998928"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@4626887667f4c251479d26f321b9e73b046a2783"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@97b06b0cfc72179c4f6522f9077d8a1d91911d61"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@5badfb56a19f68ec2373a28ddeb987cb44a632ac"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@2b6431c291c8f571803484f69d08807875996b72"',
     )
     positions = [semantics.index(command) for command in installs]
     assert positions == sorted(positions)
@@ -212,7 +212,7 @@ def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     assert re.findall(r'"(git\+https://[^\"]+)"', semantics) == [
         command.split('"', 1)[1].rsplit('"', 1)[0] for command in installs
     ]
-    for version in ("0.2.1", "0.2.1", "0.1.0"):
+    for version in ("0.4.1", "0.3.2", "0.1.1"):
         assert version in semantics
     assert 'Path(os.environ["GITHUB_WORKSPACE"]).resolve()' in semantics
     assert "Path(sys.prefix).resolve()" in semantics
@@ -231,9 +231,9 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
     for commit in (
-        "37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa",
-        "e676783256833f0c17e8ff6536f0f73365998928",
-        "4626887667f4c251479d26f321b9e73b046a2783",
+        "97b06b0cfc72179c4f6522f9077d8a1d91911d61",
+        "5badfb56a19f68ec2373a28ddeb987cb44a632ac",
+        "2b6431c291c8f571803484f69d08807875996b72",
     ):
         assert commit in matrix
     assert "Release candidate; publication `UNRUN`" in matrix
