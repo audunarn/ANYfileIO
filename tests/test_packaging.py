@@ -199,7 +199,7 @@ def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     semantics = _workflow_jobs()["semantics"]
     installs = (
         'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@97b06b0cfc72179c4f6522f9077d8a1d91911d61"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@5badfb56a19f68ec2373a28ddeb987cb44a632ac"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@c06c8fa9ca58f282941a921548bf8303a8ddd084"',
         'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@2b6431c291c8f571803484f69d08807875996b72"',
     )
     positions = [semantics.index(command) for command in installs]
@@ -232,7 +232,7 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
     for commit in (
         "97b06b0cfc72179c4f6522f9077d8a1d91911d61",
-        "5badfb56a19f68ec2373a28ddeb987cb44a632ac",
+        "c06c8fa9ca58f282941a921548bf8303a8ddd084",
         "2b6431c291c8f571803484f69d08807875996b72",
     ):
         assert commit in matrix
