@@ -27,7 +27,8 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 # Records, documents, built-in formats, and CAD-neutral contracts are NumPy-only.
-# Semantic mesh/material operations remain source-development-only in 0.2.0.
+# Semantic mesh/material operations are available through the coordinated
+# ``semantics`` extra; the base reader remains NumPy-only.
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
