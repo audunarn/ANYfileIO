@@ -249,6 +249,13 @@ def test_release_workflow_builds_but_cannot_publish() -> None:
     assert "sha256sum *.whl *.tar.gz > SHA256SUMS" in workflow
     assert "id-token" not in workflow
     assert "gh-action-pypi-publish" not in workflow
+    assert 'set(extras) != {"dev", "gui", "semantics"}' in workflow
+    assert '"ANYmesher>=0.3.2,<0.4"' in workflow
+    assert '"ANYmaterial>=0.1.1,<0.2"' in workflow
+    assert 'provides != {"dev", "gui", "semantics"}' in workflow
+    assert 'ANYmesher<0.4,>=0.3.2; extra == "semantics"' in workflow
+    assert 'ANYmaterial<0.2,>=0.1.1; extra == "semantics"' in workflow
+    assert "timeout-minutes:" not in workflow
 
 
 def test_production_publish_uses_verified_prebuilt_release_assets() -> None:
@@ -258,6 +265,11 @@ def test_production_publish_uses_verified_prebuilt_release_assets() -> None:
     assert "--pattern 'SHA256SUMS'" in workflow
     assert "SHA256SUMS does not bind the exact downloaded distribution set" in workflow
     assert "hashlib.sha256(path.read_bytes()).hexdigest()" in workflow
+    assert 'expected_tag = "v0.2.1"' in workflow
+    assert '"anyfileio-0.2.1-py3-none-any.whl"' in workflow
+    assert '"anyfileio-0.2.1.tar.gz"' in workflow
+    assert "manifest.is_symlink()" in workflow
+    assert "path.is_symlink()" in workflow
     assert "python -m build" not in workflow
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "timeout-minutes: 20" not in workflow

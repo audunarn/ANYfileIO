@@ -22,26 +22,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release download '${{ github.event.release.tag_name }}' --repo '${{ github.repository }}' --dir release --pattern '*.whl' --pattern '*.tar.gz' --pattern 'SHA256SUMS'
       - name: Verify immutable asset hashes
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           python - <<'PY'
           import hashlib
+          import os
           import re
           from pathlib import Path
 
           root = Path("release")
-          artifacts = sorted(path for path in root.iterdir() if path.name != "SHA256SUMS")
-          if len(artifacts) != 2 or sum(path.suffix == ".whl" for path in artifacts) != 1 or sum(path.name.endswith(".tar.gz") for path in artifacts) != 1:
-              raise SystemExit(f"expected exactly one wheel and one sdist, received {[path.name for path in artifacts]!r}")
+          expected_tag = "v0.2.1"
+          expected_names = {
+              "anyfileio-0.2.1-py3-none-any.whl",
+              "anyfileio-0.2.1.tar.gz",
+          }
+          if os.environ["RELEASE_TAG"] != expected_tag:
+              raise SystemExit(
+                  f"expected release tag {expected_tag!r}, received "
+                  f"{os.environ['RELEASE_TAG']!r}"
+              )
+          manifest = root / "SHA256SUMS"
+          if not manifest.is_file() or manifest.is_symlink():
+              raise SystemExit("SHA256SUMS must be a regular non-symlink file")
+          artifacts = sorted(path for path in root.iterdir() if path.name != manifest.name)
+          if {path.name for path in artifacts} != expected_names:
+              raise SystemExit(
+                  f"unexpected release assets: {[path.name for path in artifacts]!r}"
+              )
+          if any(not path.is_file() or path.is_symlink() for path in artifacts):
+              raise SystemExit("release artifacts must be regular non-symlink files")
           entries = {}
-          for line in (root / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+          for line in manifest.read_text(encoding="ascii").splitlines():
               match = re.fullmatch(r"([0-9a-fA-F]{64})  ([^/\\]+)", line)
               if match is None or match.group(2) in entries:
                   raise SystemExit("SHA256SUMS is malformed or contains duplicate/unsafe names")
               entries[match.group(2)] = match.group(1).lower()
-          if set(entries) != {path.name for path in artifacts}:
+          if set(entries) != expected_names:
               raise SystemExit("SHA256SUMS does not bind the exact downloaded distribution set")
           for path in artifacts:
-              if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != entries[path.name]:
+              if hashlib.sha256(path.read_bytes()).hexdigest() != entries[path.name]:
                   raise SystemExit(f"hash mismatch for {path.name}")
           dist = Path("dist")
           dist.mkdir()
