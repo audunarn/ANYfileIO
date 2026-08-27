@@ -25,7 +25,7 @@ class _SemanticCapabilities:
 
 
 _DISTRIBUTIONS = (
-    ("ANYmesher", "anymesher", (0, 2), (0, 3), ("Mesh",)),
+    ("ANYmesher", "anymesher", (0, 3), (0, 4), ("Mesh",)),
     (
         "ANYmaterial",
         "anymaterial",
