@@ -6,10 +6,12 @@ FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`
 
 Install the NumPy-only base with `python -m pip install ANYfileio`. It provides
 records, documents, built-in formats, the inspector and CLI, plus CAD-neutral
-records, backend discovery, and preview artifacts. Version 0.2.0 intentionally
-does not publish the semantic mesh/material owners or a native CAD provider.
-Those development-only operations remain source-compatible and fail with typed,
-truthful diagnostics when their separately managed owners are unavailable.
+records, backend discovery, and preview artifacts. Version 0.2.1 also publishes
+the optional semantic owner integration through
+`python -m pip install "ANYfileio[semantics]"`. The base remains independent of
+those owners, and semantic operations fail with typed, truthful diagnostics
+when their separately managed dependencies are unavailable. A native CAD
+provider remains a separate distribution.
 
 The repository is `ANYfileIO`, but `anyio` on PyPI is the well-known async
 compatibility library — a transitive dependency of httpx and starlette — and a
@@ -25,7 +27,7 @@ import anyfileio as io
 document = io.read_sesam_fem_document("model.FEM")
 len(document.nodes), len(document.elements), document.record_counts["GELMNT1"]
 
-# Layer 3 is source-development-only in 0.2.0; see Development below.
+# Layer 3 is available from the published 0.2.1 semantics extra.
 semantics = io.read_sesam_semantics("model.FEM")
 semantics.mesh.quads                    # an ANYmesher mesh, file node IDs kept
 semantics.materials[1].build()          # an ANYmaterial material
@@ -47,7 +49,7 @@ Each format is read in three layers, and each is useful on its own:
 | --- | --- | --- |
 | Records | what does the file say? | numpy |
 | Document | what does it mean? | numpy |
-| Semantics | what mesh and materials is that? | source-development owners (not a 0.2.0 PyPI extra) |
+| Semantics | what mesh and materials is that? | optional `ANYfileio[semantics]` extra |
 
 Most real questions about a file from another tool stop at the first or second
 layer — is it well formed, what element types are in it, what does it reference
@@ -120,7 +122,7 @@ nothing about agreement.
 
 ## Position in the family
 
-The source-development semantic layer of ANYfileio sits above
+The optional semantic layer of ANYfileio sits above
 [ANYmesher](https://github.com/audunarn/ANYmesh) and
 [ANYmaterial](https://github.com/audunarn/ANYmaterial) and below ANYsolver. The
 NumPy-only base does not import either semantic package. Semantics hands back a
@@ -144,11 +146,13 @@ python -m pip install -e "C:\Github\ANYfileIO[dev]"
 python -m pytest
 ```
 
-The 0.2.0 PyPI distribution is the NumPy-only base. Compatible ANYgeometry,
-ANYmesher, and ANYmaterial checkouts are explicit source-CI and development
-inputs only; their source tests are not installed-wheel, resolver, or release
-evidence. Native OCCT-backed CAD operations are likewise deferred. CAD-neutral
-records and preview artifacts remain part of the released base.
+The 0.2.1 PyPI distribution keeps a NumPy-only base and publishes a separate
+`semantics` extra requiring the coordinated ANYmesher 0.3.2 and ANYmaterial
+0.1.1 release lines. ANYgeometry is exercised as a bound ecosystem source and
+wheel input where the mesher requires it; it is not an eager ANYfileio base
+dependency. Source tests remain distinct from installed-wheel, resolver, and
+release evidence. Native OCCT-backed CAD operations are likewise deferred.
+CAD-neutral records and preview artifacts remain part of the released base.
 
 To open the inspector straight from a checkout — including an IDE's Run button —
 run [`run_gui.py`](run_gui.py) at the repository root, optionally with a file to

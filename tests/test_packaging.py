@@ -276,13 +276,18 @@ def test_production_publish_uses_verified_prebuilt_release_assets() -> None:
     assert "id-token: write" in workflow
 
 
-def test_public_release_claims_are_numpy_only() -> None:
+def test_public_release_separates_numpy_only_base_from_semantics_extra() -> None:
     readme = _repository_text("README.md")
     changelog = _repository_text("CHANGELOG.md")
-    assert "ANYfileio[semantics]" not in readme
-    assert "ANYfileio[semantics]" not in changelog
+    assert 'pip install ANYfileio`' in readme
+    assert 'pip install "ANYfileio[semantics]"' in readme
+    assert "The base remains independent" in readme
+    assert "optional semantic owner integration" in readme
+    assert "Publish the qualified semantic dependency extra" in changelog
+    assert "ANYmesher 0.3.2" in changelog
+    assert "ANYmaterial 0.1.1" in changelog
+    assert "## 0.2.1 - 2026-08-27" in changelog
     assert "## 0.2.0 - 2026-08-20" in changelog
-    assert "does not publish the semantic mesh/material owners" in readme
     assert "No native OCCT provider" in changelog
 
 
