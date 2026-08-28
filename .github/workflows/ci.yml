@@ -59,9 +59,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@97b06b0cfc72179c4f6522f9077d8a1d91911d61"
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@c06c8fa9ca58f282941a921548bf8303a8ddd084"
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@2b6431c291c8f571803484f69d08807875996b72"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@7085f118aa72d8381c3b424e3272929b7f3c4377"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@2e35d1a8de0c7415816b56d79c8a2a8a47c57093"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@0ea77d54ee719944fb2fa624b992a8af6091ab4b"
       - run: python -m pip install -e ".[dev]"
       - name: Verify immutable semantic owners
         shell: python
@@ -79,21 +79,21 @@ jobs:
                   "0.4.1",
                   "anygeometry",
                   "https://github.com/audunarn/ANYgeometry.git",
-                  "97b06b0cfc72179c4f6522f9077d8a1d91911d61",
+                  "7085f118aa72d8381c3b424e3272929b7f3c4377",
               ),
               (
                   "ANYmesher",
                   "0.3.2",
                   "anymesher",
                   "https://github.com/audunarn/ANYmesh.git",
-                  "c06c8fa9ca58f282941a921548bf8303a8ddd084",
+                  "2e35d1a8de0c7415816b56d79c8a2a8a47c57093",
               ),
               (
                   "ANYmaterial",
                   "0.1.1",
                   "anymaterial",
                   "https://github.com/audunarn/ANYmaterial.git",
-                  "2b6431c291c8f571803484f69d08807875996b72",
+                  "0ea77d54ee719944fb2fa624b992a8af6091ab4b",
               ),
           )
           workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()

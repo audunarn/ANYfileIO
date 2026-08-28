@@ -91,9 +91,9 @@ The semantic-development cell installs these immutable inputs in order, each
 with `--no-deps`, then installs `ANYfileio[dev]` and verifies version, source
 origin, and PEP 610 commit:
 
-1. ANYgeometry 0.4.1 `97b06b0cfc72179c4f6522f9077d8a1d91911d61`;
-2. ANYmesh / ANYmesher 0.3.2 `c06c8fa9ca58f282941a921548bf8303a8ddd084`;
-3. ANYmaterial 0.1.1 `2b6431c291c8f571803484f69d08807875996b72`.
+1. ANYgeometry 0.4.1 `7085f118aa72d8381c3b424e3272929b7f3c4377`;
+2. ANYmesh / ANYmesher 0.3.2 `2e35d1a8de0c7415816b56d79c8a2a8a47c57093`;
+3. ANYmaterial 0.1.1 `0ea77d54ee719944fb2fa624b992a8af6091ab4b`.
 
 These are source-cell inputs, not built-wheel, resolver, or release evidence.
 Base installed-wheel qualification is a required 0.2.0 release-preparation gate.

@@ -414,9 +414,9 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
 def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     semantics = _workflow_jobs()["semantics"]
     installs = (
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@97b06b0cfc72179c4f6522f9077d8a1d91911d61"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@c06c8fa9ca58f282941a921548bf8303a8ddd084"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@2b6431c291c8f571803484f69d08807875996b72"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@7085f118aa72d8381c3b424e3272929b7f3c4377"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@2e35d1a8de0c7415816b56d79c8a2a8a47c57093"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@0ea77d54ee719944fb2fa624b992a8af6091ab4b"',
     )
     positions = [semantics.index(command) for command in installs]
     assert positions == sorted(positions)
@@ -447,9 +447,9 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
     for commit in (
-        "97b06b0cfc72179c4f6522f9077d8a1d91911d61",
-        "c06c8fa9ca58f282941a921548bf8303a8ddd084",
-        "2b6431c291c8f571803484f69d08807875996b72",
+            "7085f118aa72d8381c3b424e3272929b7f3c4377",
+            "2e35d1a8de0c7415816b56d79c8a2a8a47c57093",
+            "0ea77d54ee719944fb2fa624b992a8af6091ab4b",
     ):
         assert commit in matrix
     assert "Release candidate; publication `UNRUN`" in matrix
