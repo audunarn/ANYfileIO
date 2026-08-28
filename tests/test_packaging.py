@@ -8,9 +8,18 @@ dependencies turns the layering check into decoration.
 from __future__ import annotations
 
 import ast
+import hashlib
+import io
+import json
 import re
+import subprocess
+import sys
+import tarfile
 import tomllib
+import zipfile
 from pathlib import Path
+
+import pytest
 
 import anyfileio
 from test_layering import ALLOWED_THIRD_PARTY, OPTIONAL_IMPORT_EXCEPTIONS, SEMANTIC_IMPORTS
@@ -18,6 +27,213 @@ from test_layering import ALLOWED_THIRD_PARTY, OPTIONAL_IMPORT_EXCEPTIONS, SEMAN
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 _REQUIREMENT_NAME = re.compile(r"^[A-Za-z0-9._-]+")
+
+VERIFIER = REPOSITORY_ROOT / "tools" / "verify_release_authority.py"
+DISTRIBUTION = "ANYfileio"
+NORMALIZED = "anyfileio"
+VERSION = "0.2.1"
+TAG = f"v{VERSION}"
+EXPECTED_TERMINAL = "ACCEPTED_ANYFILEIO_0_2_1_RELEASE"
+WRONG_TAG = "v0.2.0"
+WHEEL = f"{NORMALIZED}-{VERSION}-py3-none-any.whl"
+SDIST = f"{NORMALIZED}-{VERSION}.tar.gz"
+LEDGER = Path("docs/release") / f"{NORMALIZED}-{VERSION}-ledger.json"
+CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+SETUP_ACTION = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+PUBLISH_ACTION = (
+    "pypa/gh-action-pypi-publish@"
+    "dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+)
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Release Authority Test",
+            "-c",
+            "user.email=release-authority@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *arguments,
+        ],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _metadata(distribution: str = DISTRIBUTION) -> bytes:
+    return (
+        "Metadata-Version: 2.1\n"
+        f"Name: {distribution}\n"
+        f"Version: {VERSION}\n\n"
+    ).encode("utf-8")
+
+
+def _write_wheel(
+    path: Path,
+    payload: bytes,
+    *,
+    distribution: str = DISTRIBUTION,
+) -> None:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{NORMALIZED}/__init__.py", payload)
+        archive.writestr(
+            f"{NORMALIZED}-{VERSION}.dist-info/METADATA",
+            _metadata(distribution),
+        )
+
+
+def _write_sdist(path: Path) -> None:
+    info = tarfile.TarInfo(f"{NORMALIZED}-{VERSION}/PKG-INFO")
+    metadata = _metadata()
+    info.size = len(metadata)
+    with tarfile.open(path, "w:gz") as archive:
+        archive.addfile(info, io.BytesIO(metadata))
+
+
+def _write_checksums(assets: Path) -> None:
+    text = "".join(
+        f"{hashlib.sha256((assets / name).read_bytes()).hexdigest()}  {name}\n"
+        for name in sorted((WHEEL, SDIST))
+    )
+    (assets / "SHA256SUMS").write_text(text, encoding="ascii", newline="\n")
+
+
+def _run_verifier(tmp_path: Path, mutation: str = "") -> subprocess.CompletedProcess[str]:
+    repository = tmp_path / "repository"
+    remote = tmp_path / "origin.git"
+    assets = tmp_path / "release-assets"
+    repository.mkdir(parents=True)
+    remote.mkdir()
+    assets.mkdir()
+    _git(repository, "init", "--quiet")
+    _git(remote, "init", "--bare", "--quiet")
+    (repository / "source.txt").write_text("frozen artifact source\n", encoding="utf-8")
+    _git(repository, "add", "source.txt")
+    _git(repository, "commit", "--quiet", "-m", "freeze artifact source")
+    source_commit = _git(repository, "rev-parse", "HEAD")
+    source_tree = _git(repository, "rev-parse", "HEAD^{tree}")
+    _git(repository, "branch", "-M", "main")
+    _git(repository, "remote", "add", "origin", str(remote))
+    _git(repository, "push", "--quiet", "-u", "origin", "main")
+
+    _write_wheel(assets / WHEEL, b"accepted build\n")
+    if mutation == "wrong-metadata":
+        _write_wheel(
+            assets / WHEEL,
+            b"accepted build\n",
+            distribution="DifferentDistribution",
+        )
+    _write_sdist(assets / SDIST)
+    artifact_rows = []
+    for name in sorted((WHEEL, SDIST)):
+        raw = (assets / name).read_bytes()
+        artifact_rows.append(
+            {
+                "bytes": len(raw),
+                "filename": name,
+                "sha256": hashlib.sha256(raw).hexdigest().upper(),
+            }
+        )
+    ledger = {
+        "artifact_source": {"commit": source_commit, "tree": source_tree},
+        "artifacts": artifact_rows,
+        "distribution": DISTRIBUTION,
+        "publication_authorized": True,
+        "qualification": {
+            "accepted_terminal": EXPECTED_TERMINAL,
+            "evidence_sha256": "A" * 64,
+            "independent_review_sha256": "B" * 64,
+        },
+        "schema": "anyecosystem.release-ledger-v1",
+        "tag": TAG,
+        "version": VERSION,
+    }
+    if mutation == "wrong-byte-count":
+        ledger["artifacts"][0]["bytes"] += 1
+    elif mutation == "wrong-terminal":
+        ledger["qualification"]["accepted_terminal"] = "REJECTED_RELEASE"
+    elif mutation == "evidence-hash":
+        ledger["qualification"]["evidence_sha256"] = "0" * 64
+    elif mutation == "review-hash":
+        ledger["qualification"]["independent_review_sha256"] = "A" * 64
+    if mutation == "wrong-source":
+        ledger["artifact_source"]["tree"] = "0" * 40
+
+    target = repository / LEDGER
+    target.parent.mkdir(parents=True)
+    if mutation == "noncanonical":
+        target.write_text(json.dumps(ledger), encoding="utf-8")
+    else:
+        target.write_text(
+            json.dumps(ledger, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    _git(repository, "add", LEDGER.as_posix())
+    if mutation == "extra-child-path":
+        (repository / "unexpected.txt").write_text("not ledger-only\n", encoding="utf-8")
+        _git(repository, "add", "unexpected.txt")
+    _git(repository, "commit", "--quiet", "-m", "docs: authorize release artifacts")
+    _git(repository, "tag", TAG)
+    if mutation != "unmerged-tag-child":
+        _git(repository, "push", "--quiet", "origin", "HEAD:main")
+
+    _write_checksums(assets)
+    invoked_tag = TAG
+    if mutation == "paired-replacement":
+        _write_wheel(assets / WHEEL, b"replacement build\n")
+        _write_checksums(assets)
+    elif mutation == "checksum":
+        (assets / "SHA256SUMS").write_text(
+            "0" * 64 + f"  {WHEEL}\n"
+            + hashlib.sha256((assets / SDIST).read_bytes()).hexdigest()
+            + f"  {SDIST}\n",
+            encoding="ascii",
+            newline="\n",
+        )
+    elif mutation == "extra-asset":
+        (assets / "unregistered.txt").write_text("extra\n", encoding="utf-8")
+    elif mutation == "tag":
+        invoked_tag = WRONG_TAG
+
+    return subprocess.run(
+        [
+            sys.executable,
+            str(VERIFIER),
+            "--repository-root",
+            str(repository),
+            "--ledger",
+            LEDGER.as_posix(),
+            "--assets",
+            str(assets),
+            "--output",
+            str(tmp_path / "dist"),
+            "--tag",
+            invoked_tag,
+            "--protected-ref",
+            "refs/remotes/origin/main",
+            "--expected-terminal",
+            EXPECTED_TERMINAL,
+            "--distribution",
+            DISTRIBUTION,
+            "--version",
+            VERSION,
+            "--artifact",
+            WHEEL,
+            "--artifact",
+            SDIST,
+        ],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _pyproject() -> dict:
@@ -261,19 +477,58 @@ def test_release_workflow_builds_but_cannot_publish() -> None:
 def test_production_publish_uses_verified_prebuilt_release_assets() -> None:
     workflow = _repository_text(".github/workflows/publish-release-assets.yml")
     assert "types: [published]" in workflow
-    assert "gh release download" in workflow
-    assert "--pattern 'SHA256SUMS'" in workflow
-    assert "SHA256SUMS does not bind the exact downloaded distribution set" in workflow
-    assert "hashlib.sha256(path.read_bytes()).hexdigest()" in workflow
-    assert 'expected_tag = "v0.2.1"' in workflow
-    assert '"anyfileio-0.2.1-py3-none-any.whl"' in workflow
-    assert '"anyfileio-0.2.1.tar.gz"' in workflow
-    assert "manifest.is_symlink()" in workflow
-    assert "path.is_symlink()" in workflow
+    assert "github.event.release.prerelease == false" in workflow
+    assert f"ref: ${{{{ github.event.release.tag_name }}}}" in workflow
+    assert "fetch-depth: 0" in workflow
+    assert "--protected-ref refs/remotes/origin/main" in workflow
+    assert "--expected-terminal " + EXPECTED_TERMINAL in workflow
+    assert CHECKOUT_ACTION in workflow
+    assert SETUP_ACTION in workflow
+    assert PUBLISH_ACTION in workflow
+    assert "@release/v1" not in workflow
+    assert 'gh release download "$RELEASE_TAG"' in workflow
+    assert "--pattern" not in workflow
+    assert "tools/verify_release_authority.py" in workflow
+    assert LEDGER.as_posix() in workflow
+    assert "--artifact " + WHEEL in workflow
+    assert "--artifact " + SDIST in workflow
     assert "python -m build" not in workflow
-    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "timeout-minutes: 20" not in workflow
     assert "id-token: write" in workflow
+
+
+def test_release_authority_accepts_exact_ledger_bound_artifacts(tmp_path: Path) -> None:
+    completed = _run_verifier(tmp_path)
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "paired-replacement",
+        "checksum",
+        "extra-asset",
+        "tag",
+        "wrong-source",
+        "unmerged-tag-child",
+        "wrong-terminal",
+        "evidence-hash",
+        "review-hash",
+        "wrong-byte-count",
+        "wrong-metadata",
+        "extra-child-path",
+        "noncanonical",
+    ],
+)
+def test_release_authority_rejects_mutation(tmp_path: Path, mutation: str) -> None:
+    completed = _run_verifier(tmp_path / mutation, mutation)
+    assert completed.returncode != 0, mutation
+
+
+def test_paired_asset_and_checksum_replacement_is_not_authority(tmp_path: Path) -> None:
+    completed = _run_verifier(tmp_path, "paired-replacement")
+    assert completed.returncode != 0
+    assert "committed authority" in completed.stderr
 
 
 def test_public_release_separates_numpy_only_base_from_semantics_extra() -> None:
