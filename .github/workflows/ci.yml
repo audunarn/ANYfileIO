@@ -60,7 +60,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@6a8b023ef6f65805519c96b56e025b4e3b457a1f"
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e79d14a03ef605afd947948e8588ccb8428eb52f"
+      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@449a445746152c49315615ff8a1fc232db75afb9"
       - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@0591d4833806ee95bdd710c352a1f836af7b910e"
       - run: python -m pip install -e ".[dev]"
       - name: Verify immutable semantic owners
@@ -86,7 +86,7 @@ jobs:
                   "0.3.2",
                   "anymesher",
                   "https://github.com/audunarn/ANYmesh.git",
-                  "e79d14a03ef605afd947948e8588ccb8428eb52f",
+                  "449a445746152c49315615ff8a1fc232db75afb9",
               ),
               (
                   "ANYmaterial",
