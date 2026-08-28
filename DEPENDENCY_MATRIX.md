@@ -92,7 +92,7 @@ with `--no-deps`, then installs `ANYfileio[dev]` and verifies version, source
 origin, and PEP 610 commit:
 
 1. ANYgeometry 0.4.1 `6a8b023ef6f65805519c96b56e025b4e3b457a1f`;
-2. ANYmesh / ANYmesher 0.3.2 `04f923c22c342371563ab25600684a3881d2d35c`;
+2. ANYmesh / ANYmesher 0.3.2 `e79d14a03ef605afd947948e8588ccb8428eb52f`;
 3. ANYmaterial 0.1.1 `0591d4833806ee95bdd710c352a1f836af7b910e`.
 
 These are source-cell inputs, not built-wheel, resolver, or release evidence.
