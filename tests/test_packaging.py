@@ -532,6 +532,16 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
     workflow = _repository_text(".github/workflows/ci.yml")
     jobs = _workflow_jobs()
 
+    ci_checkout = (
+        "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+    )
+    ci_setup = (
+        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
+    )
+    uses = re.findall(r"(?m)^\s*- uses: (\S+)", workflow)
+    assert uses == [ci_checkout, ci_setup] * 4
+    assert all(re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", use) for use in uses)
+
     assert "pytest" not in jobs
     assert {"base-only", "semantics", "coexists-with-anyio", "wheel"} <= set(jobs)
     assert "SIBLINGS" not in workflow
@@ -558,9 +568,9 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
 def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     semantics = _workflow_jobs()["semantics"]
     installs = (
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@7085f118aa72d8381c3b424e3272929b7f3c4377"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@2e35d1a8de0c7415816b56d79c8a2a8a47c57093"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@0ea77d54ee719944fb2fa624b992a8af6091ab4b"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@6a8b023ef6f65805519c96b56e025b4e3b457a1f"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@04f923c22c342371563ab25600684a3881d2d35c"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@0591d4833806ee95bdd710c352a1f836af7b910e"',
     )
     positions = [semantics.index(command) for command in installs]
     assert positions == sorted(positions)
@@ -591,9 +601,9 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
     for commit in (
-            "7085f118aa72d8381c3b424e3272929b7f3c4377",
-            "2e35d1a8de0c7415816b56d79c8a2a8a47c57093",
-            "0ea77d54ee719944fb2fa624b992a8af6091ab4b",
+            "6a8b023ef6f65805519c96b56e025b4e3b457a1f",
+            "04f923c22c342371563ab25600684a3881d2d35c",
+            "0591d4833806ee95bdd710c352a1f836af7b910e",
     ):
         assert commit in matrix
     assert "Release candidate; publication `UNRUN`" in matrix
