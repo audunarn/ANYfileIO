@@ -1,5 +1,10 @@
 # ANYfileio
 
+> **Historical mirror:** this repository no longer publishes `ANYfileio`.
+> Development, releases, and trusted-publisher authority have moved to the
+> canonical [audunarn/ANYfileIO](https://github.com/audunarn/ANYfileIO)
+> repository. This history remains available for traceability only.
+
 Reading and writing structural finite-element interchange files: SESAM formatted
 FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`,
 `.dat`), with a tkinter inspector and a command-line interface.
