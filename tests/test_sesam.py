@@ -89,6 +89,11 @@ def test_semantics_resolves_a_neutral_mesh_and_records() -> None:
     # flattened into one "shell" bucket.
     assert semantics.mesh.tris[100] == (1, 2, 3)
     assert semantics.mesh.quads[200] == (1, 2, 4, 3)
+    tri_authority = semantics.shell_authority_of_element[100]
+    assert tri_authority.formulation_id is None
+    assert tri_authority.requires_legacy_s3_migration is True
+    assert tri_authority.physical_owner_normal == (0.0, 0.0, 1.0)
+    assert tri_authority.normal_source == "directed_connectivity"
     assert semantics.thickness_of_element[100] == pytest.approx(0.02)
     # The file's own node and element IDs survive, so anything reported against
     # them still lines up with the file it came from.
@@ -342,6 +347,14 @@ def test_semantics_resolves_explicit_shell_local_axes() -> None:
         "y": (0.0, 1.0, 0.0),
         "z": (0.0, 0.0, 1.0),
     }
+    assert semantics.shell_authority_of_element[100].physical_owner_normal == (
+        0.0,
+        0.0,
+        1.0,
+    )
+    assert semantics.shell_authority_of_element[100].normal_source == (
+        "sesam_local_axis_z"
+    )
 
 
 def test_semantics_maps_gunivec_to_beam_orientation() -> None:

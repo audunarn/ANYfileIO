@@ -99,6 +99,7 @@ from .sesam import (
     SesamFemDocument,
     SesamFemExportReport,
     SesamSemantics,
+    ShellImportAuthority,
     SesamStressResult,
     SesamSupport,
     beam_orientation,
@@ -116,7 +117,7 @@ from .sesam import (
     write_sesam_fem_document,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "BackendCompatibilityError",
@@ -169,6 +170,7 @@ __all__ = [
     "SesamFemError",
     "SesamFemExportReport",
     "SesamSemantics",
+    "ShellImportAuthority",
     "SesamStressResult",
     "SesamSupport",
     "beam_orientation",

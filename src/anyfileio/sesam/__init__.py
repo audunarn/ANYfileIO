@@ -37,6 +37,7 @@ from .records import FemRawRecord, read_raw_records, records_to_text, strict_int
 from .schema import SESAM_ELEMENT_REGISTRY, SesamElementSpec, classify_record, get_element_spec
 from .semantics import (
     SesamSemantics,
+    ShellImportAuthority,
     SesamSupport,
     beam_orientation,
     beam_section,
@@ -68,6 +69,7 @@ __all__ = [
     "SesamFemDocument",
     "SesamFemExportReport",
     "SesamSemantics",
+    "ShellImportAuthority",
     "SesamStressResult",
     "SesamSupport",
     "beam_orientation",

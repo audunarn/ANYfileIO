@@ -64,8 +64,8 @@ complete.
 
 | Distribution / extra | Target | Frozen requirements | Status |
 | --- | --- | --- | --- |
-| `ANYfileio` | `0.2.0` | `numpy>=1.26` | Release metadata `FROZEN`; PyPI publication `UNRUN` |
-| Semantic source-development runtime | not a 0.2.0 extra | accepted source commits listed below | Source CI only; installed-wheel/release claim deferred |
+| `ANYfileio` | `0.2.1` | `numpy>=1.26` | Release candidate; publication `UNRUN` |
+| `ANYfileio[semantics]` | `0.2.1` | `ANYmesher>=0.3.2,<0.4`; `ANYmaterial>=0.1.1,<0.2` | Coordinated candidate; publication `UNRUN` |
 
 The base runtime is NumPy-only. Existing SESAM/CalculiX semantic paths load
 ANYmesher and ANYmaterial only when those operations execute. The base must not
@@ -91,9 +91,9 @@ The semantic-development cell installs these immutable inputs in order, each
 with `--no-deps`, then installs `ANYfileio[dev]` and verifies version, source
 origin, and PEP 610 commit:
 
-1. ANYgeometry `37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa`;
-2. ANYmesh / ANYmesher `e676783256833f0c17e8ff6536f0f73365998928`;
-3. ANYmaterial `4626887667f4c251479d26f321b9e73b046a2783`.
+1. ANYgeometry 0.4.1 `6a8b023ef6f65805519c96b56e025b4e3b457a1f`;
+2. ANYmesh / ANYmesher 0.3.2 `449a445746152c49315615ff8a1fc232db75afb9`;
+3. ANYmaterial 0.1.1 `0591d4833806ee95bdd710c352a1f836af7b910e`.
 
 These are source-cell inputs, not built-wheel, resolver, or release evidence.
 Base installed-wheel qualification is a required 0.2.0 release-preparation gate.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 - 2026-08-27
+
+- Publish the qualified semantic dependency extra for ANYmesher 0.3.2 and
+  ANYmaterial 0.1.1.
+- Preserve shell physical owner normals while leaving absent neutral-file
+  formulation IDs explicit, so historical TRI3 records require legacy
+  migration rather than inheriting a qualified default.
+
 ## 0.2.0 - 2026-08-20
 
 Added:

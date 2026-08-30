@@ -14,7 +14,6 @@ jobs:
   build:
     name: Validate and build distributions
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Check out the triggering ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,8 +37,8 @@ jobs:
           metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           project = metadata["project"]
           version = project["version"]
-          if version != "0.2.0":
-              raise SystemExit(f"expected release version 0.2.0, received {version!r}")
+          if version != "0.2.1":
+              raise SystemExit(f"expected release version 0.2.1, received {version!r}")
 
           init_text = Path("src/anyfileio/__init__.py").read_text(encoding="utf-8")
           match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', init_text, re.MULTILINE)
@@ -47,12 +46,19 @@ jobs:
               raise SystemExit("pyproject.toml and anyfileio.__version__ disagree")
 
           extras = project.get("optional-dependencies", {})
-          if set(extras) != {"dev", "gui"} or "semantics" in extras:
+          if set(extras) != {"dev", "gui", "semantics"}:
               raise SystemExit(f"unexpected release extras: {sorted(extras)!r}")
+          if extras["semantics"] != [
+              "ANYmesher>=0.3.2,<0.4",
+              "ANYmaterial>=0.1.1,<0.2",
+          ]:
+              raise SystemExit(
+                  f"unexpected semantics dependencies: {extras['semantics']!r}"
+              )
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          if "## 0.2.0 - 2026-08-20" not in changelog:
-              raise SystemExit("CHANGELOG.md is missing the final 0.2.0 release heading")
+          if "## 0.2.1 - 2026-08-27" not in changelog:
+              raise SystemExit("CHANGELOG.md is missing the final 0.2.1 release heading")
           PY
       - name: Build and check distributions
         run: |
@@ -66,7 +72,7 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          version = "0.2.0"
+          version = "0.2.1"
           expected = [
               f"anyfileio-{version}-py3-none-any.whl",
               f"anyfileio-{version}.tar.gz",
@@ -75,7 +81,7 @@ jobs:
           if actual != expected:
               raise SystemExit(f"unexpected distribution set: {actual!r}; expected {expected!r}")
 
-          forbidden = ("anygeometry", "anymesher", "anymaterial", "ocp", "cadquery")
+          forbidden = ("anygeometry", "ocp", "cadquery")
           with zipfile.ZipFile(Path("dist", expected[0])) as archive:
               names = archive.namelist()
               metadata_name, = [name for name in names if name.endswith(".dist-info/METADATA")]
@@ -87,8 +93,21 @@ jobs:
               if runtime != ["numpy>=1.26"]:
                   raise SystemExit(f"unexpected runtime requirements: {runtime!r}")
               provides = set(metadata.get_all("Provides-Extra", []))
-              if provides != {"dev", "gui"}:
+              if provides != {"dev", "gui", "semantics"}:
                   raise SystemExit(f"unexpected provided extras: {sorted(provides)!r}")
+              semantics = {
+                  item
+                  for item in requirements
+                  if 'extra == "semantics"' in item
+              }
+              expected_semantics = {
+                  'ANYmaterial<0.2,>=0.1.1; extra == "semantics"',
+                  'ANYmesher<0.4,>=0.3.2; extra == "semantics"',
+              }
+              if semantics != expected_semantics:
+                  raise SystemExit(
+                      f"unexpected semantics requirements: {sorted(semantics)!r}"
+                  )
               flattened = "\n".join(requirements).lower()
               if any(name in flattened for name in forbidden):
                   raise SystemExit("wheel metadata contains a deferred owner/provider")
@@ -116,10 +135,12 @@ jobs:
                   if f"{root}/{relative}" not in members:
                       raise SystemExit(f"sdist is missing {relative}")
           PY
+      - name: Generate release checksums
+        run: cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS
       - name: Upload checked artifacts for manual download
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: anyfileio-0.2.0-distributions
+          name: anyfileio-0.2.1-distributions
           path: dist/
           if-no-files-found: error
           retention-days: 7
