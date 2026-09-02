@@ -227,6 +227,20 @@ def test_successes_are_cached_and_failures_are_not(monkeypatch: pytest.MonkeyPat
     assert module_calls == ["anymesher", "anymaterial"]
 
 
+def test_anymesher_03_semantics_generation_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_versions(monkeypatch, {"ANYmesher": "0.3.2", "ANYmaterial": "0.1.1"})
+    _set_modules(monkeypatch)
+
+    capabilities = dependencies.require_semantics()
+
+    assert (capabilities.Mesh, capabilities.MaterialSpec) == (
+        DummyMesh,
+        DummyMaterialSpec,
+    )
+
+
 def test_read_semantics_fails_before_reading_the_source(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_versions(monkeypatch, {})
 
@@ -274,7 +288,7 @@ def test_diagnostics_have_exact_codes_context_and_source_setup_hint(
     _assert_dependency_error(missing.value, "SEM001")
 
     dependencies._reset_semantics_cache()
-    _set_versions(monkeypatch, {"ANYmesher": "0.3.0", "ANYmaterial": "0.1.0"})
+    _set_versions(monkeypatch, {"ANYmesher": "0.4.0", "ANYmaterial": "0.1.0"})
     with pytest.raises(SemanticDependencyError) as incompatible:
         dependencies.require_semantics()
     _assert_dependency_error(incompatible.value, "SEM002")
