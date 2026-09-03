@@ -108,7 +108,7 @@ CadError(RuntimeError)
 Every instance exposes a stable `code: str` and `diagnostic: CadDiagnostic`.
 A missing backend raises `BackendUnavailableError` with code
 `cad.backend.missing` and a source-development hint stating that native CAD
-operations are not included in the ANYfileio 0.3.0 PyPI release.
+operations are not included in the ANYfileio 0.3.1 PyPI release.
 Duplicate, broken, and incompatible providers use respectively
 `cad.backend.duplicate`, `cad.backend.load_failed`, and
 `cad.backend.incompatible`. Diagnostics record backend id, operation, state,

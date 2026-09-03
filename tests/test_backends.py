@@ -239,7 +239,7 @@ def test_missing_backend_error_has_exact_code_and_install_hint(monkeypatch) -> N
         _load_backend()
     assert caught.value.code == "cad.backend.missing"
     assert caught.value.diagnostic.details["install_hint"] == (
-        "native CAD operations are not included in the ANYfileio 0.3.0 PyPI release; "
+        "native CAD operations are not included in the ANYfileio 0.3.1 PyPI release; "
         "see https://github.com/audunarn/ANYfileIO#development"
     )
 
