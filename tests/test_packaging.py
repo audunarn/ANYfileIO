@@ -8,6 +8,7 @@ dependencies turns the layering check into decoration.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -94,6 +95,65 @@ def test_version_matches_pyproject() -> None:
 
 def test_base_dependencies_are_numpy_only() -> None:
     assert _base_dependencies() == ("numpy>=1.26",)
+
+
+def test_release_license_and_notice_inventory_is_exact() -> None:
+    project = _pyproject()["project"]
+    assert project["license"] == "MPL-2.0"
+    assert set(project["license-files"]) == {
+        "LICENSE",
+        "LICENSE-DOCS.md",
+        "NOTICE",
+        "THIRD_PARTY_NOTICES.md",
+    }
+
+    license_text = _repository_text("LICENSE")
+    assert license_text.startswith("Mozilla Public License Version 2.0")
+    assert 'Exhibit A - Source Code Form License Notice' in license_text
+    assert 'Exhibit B - "Incompatible With Secondary Licenses" Notice' in license_text
+
+    notice = _repository_text("NOTICE")
+    assert "Copyright (c) 2026 Audun Arnesen Nyhus" in notice
+    assert "Mozilla Public License 2.0" in notice
+    assert "Creative Commons Attribution 4.0 International" in notice
+
+    docs_license = _repository_text("LICENSE-DOCS.md")
+    assert "Creative Commons Attribution 4.0 International" in docs_license
+    third_party = _repository_text("THIRD_PARTY_NOTICES.md")
+    assert "| NumPy | `numpy>=1.26`" in third_party
+    assert "BSD-3-Clause" in third_party
+    assert "not included in the ANYfileio wheel or source distribution" in third_party
+
+    manifest = _repository_text("MANIFEST.in")
+    for relative in project["license-files"]:
+        assert f"include {relative}" in manifest
+    assert "include dependency-licenses.json" in manifest
+
+
+def test_runtime_dependency_license_inventory_is_complete_and_permissive() -> None:
+    inventory = json.loads(_repository_text("dependency-licenses.json"))
+    assert inventory == {
+        "schema_version": 1,
+        "release": "ANYfileio 0.3.0",
+        "observed_on": "2026-09-03",
+        "dependencies": [
+            {
+                "distribution": "numpy",
+                "requirement": "numpy>=1.26",
+                "license": "BSD-3-Clause",
+                "upstream": "https://numpy.org/",
+                "bundled": False,
+            }
+        ],
+    }
+    assert {item["requirement"] for item in inventory["dependencies"]} == set(
+        _base_dependencies()
+    )
+    assert all(
+        item["license"]
+        in {"MPL-2.0", "Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC"}
+        for item in inventory["dependencies"]
+    )
 
 
 def test_release_does_not_advertise_the_source_only_semantics_runtime() -> None:
@@ -233,29 +293,41 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
         "4626887667f4c251479d26f321b9e73b046a2783",
     ):
         assert commit in matrix
-    assert "Release metadata `FROZEN`; PyPI publication `UNRUN`" in matrix
+    assert "`ANYfileio` | `0.3.0` | `numpy>=1.26`" in matrix
+    assert "MPL-2.0 release candidate" in matrix
     assert "Source CI only; installed-wheel/release claim deferred" in matrix
-    assert "publication remains `UNRUN`" in matrix
+    assert "Required before PyPI Trusted Publishing" in matrix
     assert "These are source-cell inputs, not built-wheel, resolver, or release evidence." in matrix
 
 
-def test_release_workflow_builds_but_cannot_publish() -> None:
+def test_release_workflow_uses_manual_trusted_publishing() -> None:
     workflow = _repository_text(".github/workflows/publish.yml")
     assert "workflow_dispatch:" in workflow
     assert "release:" not in workflow
-    assert "id-token" not in workflow
-    assert "gh-action-pypi-publish" not in workflow
+    assert "push:" not in workflow
+    assert "permissions: {}" in workflow
+    assert "publish:" in workflow
+    assert "if: ${{ inputs.publish }}" in workflow
+    assert "name: pypi" in workflow
+    assert "id-token: write" in workflow
+    assert "secrets." not in workflow
+    assert "password:" not in workflow
     assert "upload.pypi.org" not in workflow
     assert "test.pypi.org" not in workflow
     assert "refs/heads/main" in workflow
-    assert "expected release version 0.2.0" in workflow
+    assert "expected release version {version}" in workflow
+    assert 'version = "0.3.0"' in workflow
     assert "anyfileio-{version}-py3-none-any.whl" in workflow
     assert "anyfileio-{version}.tar.gz" in workflow
     assert "unexpected runtime requirements" in workflow
     assert "wheel metadata contains a deferred owner/provider" in workflow
+    assert "wheel is missing entry point" in workflow
+    assert "License-Expression" in workflow
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in workflow
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
+    assert "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0" in workflow
+    assert "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33" in workflow
 
 
 def test_public_release_claims_are_numpy_only() -> None:
@@ -263,9 +335,11 @@ def test_public_release_claims_are_numpy_only() -> None:
     changelog = _repository_text("CHANGELOG.md")
     assert "ANYfileio[semantics]" not in readme
     assert "ANYfileio[semantics]" not in changelog
-    assert "## 0.2.0 - 2026-08-20" in changelog
+    assert "## 0.3.0 - 2026-09-03" in changelog
     assert "does not publish the semantic mesh/material owners" in readme
-    assert "No native OCCT provider" in changelog
+    assert "no native OCCT provider" in changelog
+    assert "Mozilla Public License 2.0" in readme
+    assert "Earlier releases remain available under the license terms" in readme
 
 
 def test_semantic_consumer_tests_gate_optional_owners_locally() -> None:

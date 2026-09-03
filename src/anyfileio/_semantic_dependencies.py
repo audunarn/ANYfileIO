@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .diagnostics import FemDiagnostic, SemanticDependencyError
 
 _SETUP_HINT = (
-    "semantic operations are source-development-only in ANYfileio 0.2.0; "
+    "semantic operations are source-development-only in ANYfileio 0.3.0; "
     "see https://github.com/audunarn/ANYfileIO#development"
 )
 _NUMERIC_RELEASE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")

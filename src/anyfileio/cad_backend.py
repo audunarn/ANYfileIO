@@ -27,7 +27,7 @@ BACKEND_ID = "occt"
 CAD_BACKEND_PROTOCOL_VERSION = 1
 BACKEND_COMPATIBILITY_VERSION = 1
 INSTALL_HINT = (
-    "native CAD operations are not included in the ANYfileio 0.2.0 PyPI release; "
+    "native CAD operations are not included in the ANYfileio 0.3.0 PyPI release; "
     "see https://github.com/audunarn/ANYfileIO#development"
 )
 

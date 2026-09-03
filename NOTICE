@@ -1,0 +1,16 @@
+ANYfileio
+Copyright (c) 2026 Audun Arnesen Nyhus
+
+Source code, tests, examples, and build configuration in this repository are
+licensed under the Mozilla Public License 2.0. See LICENSE.
+
+Original project documentation in README.md, MIGRATION.md, CHANGELOG.md, and
+docs/ is licensed under the Creative Commons Attribution 4.0 International
+license. See LICENSE-DOCS.md.
+
+Third-party software and material retain their own licenses. See
+THIRD_PARTY_NOTICES.md. The standard license texts and factual third-party
+notices are not relicensed by this notice.
+
+Earlier published ANYfileio versions remain governed by the license terms that
+accompanied those versions. Repository history has not been rewritten.

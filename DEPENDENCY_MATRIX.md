@@ -1,9 +1,10 @@
 # ANYfileIO / OCCT CAD dependency and qualification matrix
 
 Status: frozen dependency metadata and explicit qualification ledger for the
-ANYfileIO 0.2 / ANYfileio-occt 0.1 implementation line.
+ANYfileIO 0.3 / ANYfileio-occt 0.1 implementation line.
 
 Date of metadata observation: 2026-08-12 (Europe/Oslo).
+Release metadata updated: 2026-09-03 (Europe/Oslo).
 
 Authoritative inputs:
 
@@ -64,8 +65,8 @@ complete.
 
 | Distribution / extra | Target | Frozen requirements | Status |
 | --- | --- | --- | --- |
-| `ANYfileio` | `0.2.0` | `numpy>=1.26` | Release metadata `FROZEN`; PyPI publication `UNRUN` |
-| Semantic source-development runtime | not a 0.2.0 extra | accepted source commits listed below | Source CI only; installed-wheel/release claim deferred |
+| `ANYfileio` | `0.3.0` | `numpy>=1.26` | MPL-2.0 release candidate; publication requires validated Trusted Publishing workflow |
+| Semantic source-development runtime | not a 0.3.0 extra | accepted source commits listed below | Source CI only; installed-wheel/release claim deferred |
 
 The base runtime is NumPy-only. Existing SESAM/CalculiX semantic paths load
 ANYmesher and ANYmaterial only when those operations execute. The base must not
@@ -73,13 +74,13 @@ depend on ANYgeometry, ANYmesher, ANYmaterial, OCP, CadQuery, or
 ANYfileio-occt.
 
 The CAD semantic-operation acceptance range is exactly
-`ANYmesher>=0.2,<0.3`. CAD functionality checks that range at the semantic
+`ANYmesher>=0.2,<0.4`. CAD functionality checks that range at the semantic
 operation boundary and never infers compatibility from a broader
 package-install range.
 
 The canonical lazy runtime transition is accepted at
 `1f0b5780df7f025fc786fd3db2cba9da2104fb5c`: base imports are eager-free and
-semantic operations validate their owners only when called. For the 0.2.0 PyPI
+semantic operations validate their owners only when called. For the 0.3.0 PyPI
 release, the declared runtime requirement is exactly NumPy and no semantic extra
 is advertised. Semantic operations remain source-compatible for development and
 fail with typed `SEM001`, `SEM002`, or `SEM003` diagnostics when an owner is
@@ -96,9 +97,9 @@ origin, and PEP 610 commit:
 3. ANYmaterial `4626887667f4c251479d26f321b9e73b046a2783`.
 
 These are source-cell inputs, not built-wheel, resolver, or release evidence.
-Base installed-wheel qualification is a required 0.2.0 release-preparation gate.
+Base installed-wheel qualification is a required 0.3.0 release-preparation gate.
 Semantic installed-wheel qualification is deferred until separately published,
-hash-pinned owner artifacts exist; it is not a claim of the 0.2.0 base release.
+hash-pinned owner artifacts exist; it is not a claim of the 0.3.0 base release.
 
 ### 3.2 Heavy provider and geometry adapter
 
@@ -313,8 +314,8 @@ built-wheel isolation gate.
 
 | Environment | Required result | Status |
 | --- | --- | --- |
-| ANYfileio 0.2.0 base only | NumPy plus core; ANYgeometry, ANYmesher, ANYmaterial, OCP, CadQuery, and ANYfileio-occt absent; import/CLI/core CAD records/artifact reopen pass | Required before manual PyPI upload; publication remains `UNRUN` |
-| Semantic source development | three immutable owner commits above; lazy semantic operation succeeds | Source-CI evidence only; no 0.2.0 extra or installed-wheel/release claim |
+| ANYfileio 0.3.0 base only | NumPy plus core; ANYgeometry, ANYmesher, ANYmaterial, OCP, CadQuery, and ANYfileio-occt absent; import/CLI/core CAD records/artifact reopen pass | Required before PyPI Trusted Publishing |
+| Semantic source development | three immutable owner commits above; lazy semantic operation succeeds | Source-CI evidence only; no 0.3.0 extra or installed-wheel/release claim |
 | Transitional legacy resolver | real hash-pinned ANYmesher 0.1.0 and 0.2.1 compatibility for proposed install-only `>=0.1,<0.3`; never a CAD-capability pass and never merged alone | `BLOCKED` on separate resolver-owner plan/evidence |
 | ANYfileio-occt base | core + NumPy + exact OCP wheel; no geometry | `UNRUN` |
 | ANYfileio-occt geometry | heavy base + ANYgeometry 0.2.1; no consumer | `UNRUN` |
@@ -371,9 +372,10 @@ future disjoint resolver evidence/owner commit (if accepted)
   -> integration without weakening CAD >=0.2 semantic checks
 
 accepted core public API + accepted lazy semantic runtime
-  -> remove unresolved semantic extra from 0.2.0 metadata
+  -> keep the unresolved semantic extra out of 0.3.0 metadata
+  -> apply MPL-2.0 source and CC BY 4.0 documentation licensing
   -> NumPy-only wheel/sdist and installed-artifact qualification
-  -> manual ANYfileIO 0.2.0 PyPI upload
+  -> protected-environment ANYfileIO 0.3.0 PyPI Trusted Publishing
 
 future accepted hash-pinned ANYgeometry / ANYmesher / ANYmaterial artifacts
   -> separately registered semantics installed-wheel qualification
@@ -393,9 +395,9 @@ accepted imported-CAD heavy API + accepted ANYfem V6/native/UI handoff
 
 ANYgeometry 0.2.1 is already delivered and read-only. This CAD work does not
 create ANYmesher 0.1.1, modify ANYmesh, or create an ANYsolver compatibility
-release. A completion review is not publication authority. Push, package-index
-upload, tag, release, and publication remain separately authorized future
-actions after compatible artifacts and observed gates exist.
+release. A completion review is not publication evidence. The 0.3.0
+package-index upload occurs only through the separately permissioned publish
+job after its source, artifact, and installed-package gates pass.
 
 The ANYmesher handoff gates dependency-floor and semantic/resolver work; it is
 not a prerequisite for disjoint provider code that consumes only the frozen

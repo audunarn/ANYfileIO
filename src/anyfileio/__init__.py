@@ -116,7 +116,7 @@ from .sesam import (
     write_sesam_fem_document,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "BackendCompatibilityError",

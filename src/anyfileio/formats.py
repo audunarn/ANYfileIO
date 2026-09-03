@@ -71,7 +71,7 @@ _BUILTIN_FORMATS = (
     FormatDescriptor("sesam-sif", (".sif",), "finite_element_results", frozenset({"read", "inspect"})),
 )
 _CAD_INSTALL_HINT = (
-    "native CAD operations are not included in the ANYfileio 0.2.0 PyPI release; "
+    "native CAD operations are not included in the ANYfileio 0.3.0 PyPI release; "
     "see https://github.com/audunarn/ANYfileIO#development"
 )
 _CAD_FORMATS = (

@@ -6,7 +6,7 @@ FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`
 
 Install the NumPy-only base with `python -m pip install ANYfileio`. It provides
 records, documents, built-in formats, the inspector and CLI, plus CAD-neutral
-records, backend discovery, and preview artifacts. Version 0.2.0 intentionally
+records, backend discovery, and preview artifacts. Version 0.3.0 intentionally
 does not publish the semantic mesh/material owners or a native CAD provider.
 Those development-only operations remain source-compatible and fail with typed,
 truthful diagnostics when their separately managed owners are unavailable.
@@ -25,7 +25,7 @@ import anyfileio as io
 document = io.read_sesam_fem_document("model.FEM")
 len(document.nodes), len(document.elements), document.record_counts["GELMNT1"]
 
-# Layer 3 is source-development-only in 0.2.0; see Development below.
+# Layer 3 is source-development-only in 0.3.0; see Development below.
 semantics = io.read_sesam_semantics("model.FEM")
 semantics.mesh.quads                    # an ANYmesher mesh, file node IDs kept
 semantics.materials[1].build()          # an ANYmaterial material
@@ -47,7 +47,7 @@ Each format is read in three layers, and each is useful on its own:
 | --- | --- | --- |
 | Records | what does the file say? | numpy |
 | Document | what does it mean? | numpy |
-| Semantics | what mesh and materials is that? | source-development owners (not a 0.2.0 PyPI extra) |
+| Semantics | what mesh and materials is that? | source-development owners (not a 0.3.0 PyPI extra) |
 
 Most real questions about a file from another tool stop at the first or second
 layer — is it well formed, what element types are in it, what does it reference
@@ -144,7 +144,7 @@ python -m pip install -e "C:\Github\ANYfileIO[dev]"
 python -m pytest
 ```
 
-The 0.2.0 PyPI distribution is the NumPy-only base. Compatible ANYgeometry,
+The 0.3.0 PyPI distribution is the NumPy-only base. Compatible ANYgeometry,
 ANYmesher, and ANYmaterial checkouts are explicit source-CI and development
 inputs only; their source tests are not installed-wheel, resolver, or release
 evidence. Native OCCT-backed CAD operations are likewise deferred. CAD-neutral
@@ -158,3 +158,17 @@ checkouts are never injected into the inspector process.
 ```bash
 python run_gui.py model.FEM
 ```
+
+## License
+
+Starting with version 0.3.0, the ANYfileio source code is licensed under the
+[Mozilla Public License 2.0](LICENSE). Original project documentation is
+licensed under [Creative Commons Attribution 4.0](LICENSE-DOCS.md). See
+[NOTICE](NOTICE) for the copyright and scope statement and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the runtime dependency
+notice. A machine-readable copy is provided in
+[dependency-licenses.json](dependency-licenses.json).
+
+Earlier releases remain available under the license terms that accompanied
+those releases. In particular, version 0.2.0 was distributed under
+GPL-3.0-or-later; the repository history is intentionally not rewritten.

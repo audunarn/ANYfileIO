@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "release": "ANYfileio 0.3.0",
+  "observed_on": "2026-09-03",
+  "dependencies": [
+    {
+      "distribution": "numpy",
+      "requirement": "numpy>=1.26",
+      "license": "BSD-3-Clause",
+      "upstream": "https://numpy.org/",
+      "bundled": false
+    }
+  ]
+}

@@ -1,4 +1,8 @@
 include LICENSE
+include LICENSE-DOCS.md
+include NOTICE
+include THIRD_PARTY_NOTICES.md
+include dependency-licenses.json
 include README.md
 include CHANGELOG.md
 include MIGRATION.md

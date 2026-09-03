@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 - 2026-09-03
+
+Changed:
+
+- **MPL-2.0 licensing.** Starting with 0.3.0, ANYfileio source code is licensed
+  under the Mozilla Public License 2.0. Original project documentation is
+  licensed under CC BY 4.0. Earlier releases retain the license terms that
+  accompanied them; Git history has not been rewritten.
+- **Auditable notices.** The source and binary distributions include the
+  repository license, copyright/scope notice, documentation-license notice,
+  and the runtime dependency notice for NumPy.
+- **Semantic source compatibility.** The development-only semantic adapter now
+  admits compatible ANYmesher 0.2 and 0.3 sources. It remains absent from
+  published extras and is not a runtime dependency of the NumPy-only package.
+- **Secure publication path.** Release artifacts are built and validated in a
+  credential-free job, then may be published from a separate protected GitHub
+  environment using PyPI Trusted Publishing. No API token is stored in the
+  repository or workflow.
+
+Boundaries retained:
+
+- The PyPI package contains CAD-neutral records, discovery, orchestration, and
+  preview artifacts, but no native OCCT provider or native CAD capability.
+- ANYgeometry, ANYmesher, ANYmaterial, CadQuery, OCP, and ANYfileio-occt are not
+  runtime dependencies and are not bundled.
+
 ## 0.2.0 - 2026-08-20
 
 Added:

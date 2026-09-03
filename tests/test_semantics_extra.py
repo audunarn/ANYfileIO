@@ -19,7 +19,7 @@ from anyfileio.sesam.semantics import SesamSemantics, SesamSupport, read_sesam_s
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 SETUP_HINT = (
-    "semantic operations are source-development-only in ANYfileio 0.2.0; "
+    "semantic operations are source-development-only in ANYfileio 0.3.0; "
     "see https://github.com/audunarn/ANYfileIO#development"
 )
 
