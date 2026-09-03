@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 - 2026-09-03
+
+Fixed:
+
+- Admit the coordinated ANYmesher 0.4 and ANYmaterial 0.2 semantic owners at
+  the existing lazy operation boundary. This repairs the installed ecosystem
+  graph without adding either owner as a base dependency or published extra.
+- Bind source CI to the exact published owner commits used by ANYsolver 0.4.1
+  and ANYfem 0.4.0.
+
+Unchanged:
+
+- The wheel remains NumPy-only. Native CAD providers and semantic owners are
+  still separately distributed and loaded only when their operations execute.
+
 ## 0.3.0 - 2026-09-03
 
 Changed:

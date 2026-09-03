@@ -134,7 +134,7 @@ def test_runtime_dependency_license_inventory_is_complete_and_permissive() -> No
     inventory = json.loads(_repository_text("dependency-licenses.json"))
     assert inventory == {
         "schema_version": 1,
-        "release": "ANYfileio 0.3.0",
+        "release": "ANYfileio 0.3.1",
         "observed_on": "2026-09-03",
         "dependencies": [
             {
@@ -255,9 +255,9 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
 def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     semantics = _workflow_jobs()["semantics"]
     installs = (
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@e676783256833f0c17e8ff6536f0f73365998928"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@4626887667f4c251479d26f321b9e73b046a2783"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@dd954f088a4cb95e267280cc4777b09e16232bd9"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@27e428188a891705288fef82bab0b166e330aff2"',
+        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2"',
     )
     positions = [semantics.index(command) for command in installs]
     assert positions == sorted(positions)
@@ -269,7 +269,7 @@ def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
     assert re.findall(r'"(git\+https://[^\"]+)"', semantics) == [
         command.split('"', 1)[1].rsplit('"', 1)[0] for command in installs
     ]
-    for version in ("0.2.1", "0.2.1", "0.1.0"):
+    for version in ("0.4.2", "0.4.0", "0.2.0"):
         assert version in semantics
     assert 'Path(os.environ["GITHUB_WORKSPACE"]).resolve()' in semantics
     assert "Path(sys.prefix).resolve()" in semantics
@@ -288,12 +288,12 @@ def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
     for commit in (
-        "37234b7bc6b6c3f2e02cf1c53acb875245d9c3aa",
-        "e676783256833f0c17e8ff6536f0f73365998928",
-        "4626887667f4c251479d26f321b9e73b046a2783",
+        "dd954f088a4cb95e267280cc4777b09e16232bd9",
+        "27e428188a891705288fef82bab0b166e330aff2",
+        "d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2",
     ):
         assert commit in matrix
-    assert "`ANYfileio` | `0.3.0` | `numpy>=1.26`" in matrix
+    assert "`ANYfileio` | `0.3.1` | `numpy>=1.26`" in matrix
     assert "MPL-2.0 release candidate" in matrix
     assert "Source CI only; installed-wheel/release claim deferred" in matrix
     assert "Required before PyPI Trusted Publishing" in matrix
@@ -316,7 +316,7 @@ def test_release_workflow_uses_manual_trusted_publishing() -> None:
     assert "test.pypi.org" not in workflow
     assert "refs/heads/main" in workflow
     assert "expected release version {version}" in workflow
-    assert 'version = "0.3.0"' in workflow
+    assert 'version = "0.3.1"' in workflow
     assert "anyfileio-{version}-py3-none-any.whl" in workflow
     assert "anyfileio-{version}.tar.gz" in workflow
     assert "unexpected runtime requirements" in workflow
@@ -335,7 +335,7 @@ def test_public_release_claims_are_numpy_only() -> None:
     changelog = _repository_text("CHANGELOG.md")
     assert "ANYfileio[semantics]" not in readme
     assert "ANYfileio[semantics]" not in changelog
-    assert "## 0.3.0 - 2026-09-03" in changelog
+    assert "## 0.3.1 - 2026-09-03" in changelog
     assert "does not publish the semantic mesh/material owners" in readme
     assert "no native OCCT provider" in changelog
     assert "Mozilla Public License 2.0" in readme

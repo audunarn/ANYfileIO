@@ -19,7 +19,7 @@ from anyfileio.sesam.semantics import SesamSemantics, SesamSupport, read_sesam_s
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 SETUP_HINT = (
-    "semantic operations are source-development-only in ANYfileio 0.3.0; "
+    "semantic operations are source-development-only in ANYfileio 0.3.1; "
     "see https://github.com/audunarn/ANYfileIO#development"
 )
 
@@ -171,7 +171,8 @@ def test_missing_distributions_raise_sem001_before_any_semantic_import(
         {"ANYmesher": "0.1.9", "ANYmaterial": "0.1.0"},
         {"ANYmesher": "0.2.0rc1", "ANYmaterial": "0.1.0"},
         {"ANYmesher": "0.2.0+local", "ANYmaterial": "0.1.0"},
-        {"ANYmesher": "0.2.0", "ANYmaterial": "0.2.0"},
+        {"ANYmesher": "0.5.0", "ANYmaterial": "0.2.0"},
+        {"ANYmesher": "0.4.0", "ANYmaterial": "0.3.0"},
     ],
 )
 def test_incompatible_or_nonrelease_versions_raise_sem002_before_import(
@@ -192,7 +193,7 @@ def test_incompatible_or_nonrelease_versions_raise_sem002_before_import(
 
 
 def test_module_or_symbol_failure_raises_sem003(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_versions(monkeypatch, {"ANYmesher": "0.2.1", "ANYmaterial": "0.1.0"})
+    _set_versions(monkeypatch, {"ANYmesher": "0.4.0", "ANYmaterial": "0.2.0"})
     modules = {
         "anymesher": SimpleNamespace(Mesh=DummyMesh),
         "anymaterial": SimpleNamespace(elastic_compliance_matrix=lambda material: material),
@@ -217,7 +218,7 @@ def test_successes_are_cached_and_failures_are_not(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(SemanticDependencyError):
         dependencies.require_semantics()
-    versions.update({"ANYmesher": "0.2.1", "ANYmaterial": "0.1.0"})
+    versions.update({"ANYmesher": "0.4.0", "ANYmaterial": "0.2.0"})
 
     first = dependencies.require_semantics()
     second = dependencies.require_semantics()
@@ -227,10 +228,10 @@ def test_successes_are_cached_and_failures_are_not(monkeypatch: pytest.MonkeyPat
     assert module_calls == ["anymesher", "anymaterial"]
 
 
-def test_anymesher_03_semantics_generation_is_accepted(
+def test_coordinated_semantics_generation_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _set_versions(monkeypatch, {"ANYmesher": "0.3.2", "ANYmaterial": "0.1.1"})
+    _set_versions(monkeypatch, {"ANYmesher": "0.4.0", "ANYmaterial": "0.2.0"})
     _set_modules(monkeypatch)
 
     capabilities = dependencies.require_semantics()
@@ -288,13 +289,13 @@ def test_diagnostics_have_exact_codes_context_and_source_setup_hint(
     _assert_dependency_error(missing.value, "SEM001")
 
     dependencies._reset_semantics_cache()
-    _set_versions(monkeypatch, {"ANYmesher": "0.4.0", "ANYmaterial": "0.1.0"})
+    _set_versions(monkeypatch, {"ANYmesher": "0.5.0", "ANYmaterial": "0.2.0"})
     with pytest.raises(SemanticDependencyError) as incompatible:
         dependencies.require_semantics()
     _assert_dependency_error(incompatible.value, "SEM002")
 
     dependencies._reset_semantics_cache()
-    _set_versions(monkeypatch, {"ANYmesher": "0.2.0", "ANYmaterial": "0.1.0"})
+    _set_versions(monkeypatch, {"ANYmesher": "0.4.0", "ANYmaterial": "0.2.0"})
     monkeypatch.setattr(
         dependencies,
         "import_module",

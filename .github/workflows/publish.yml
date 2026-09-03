@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version (must be 0.3.0)
+        description: Release version (must be 0.3.1)
         required: true
-        default: "0.3.0"
+        default: "0.3.1"
         type: string
       publish:
         description: Publish the validated artifacts to PyPI
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build:
     name: Build and validate distributions
-    if: github.ref == 'refs/heads/main' && inputs.version == '0.3.0'
+    if: github.ref == 'refs/heads/main' && inputs.version == '0.3.1'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -46,7 +46,7 @@ jobs:
           import tomllib
           from pathlib import Path
 
-          version = "0.3.0"
+          version = "0.3.1"
           metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           project = metadata["project"]
           if project["version"] != version:
@@ -74,7 +74,7 @@ jobs:
           dependency_licenses = json.loads(
               Path("dependency-licenses.json").read_text(encoding="utf-8")
           )
-          if dependency_licenses.get("release") != "ANYfileio 0.3.0":
+          if dependency_licenses.get("release") != "ANYfileio 0.3.1":
               raise SystemExit("dependency license inventory has the wrong release")
           if dependency_licenses.get("dependencies") != [
               {
@@ -90,8 +90,8 @@ jobs:
           if set(extras) != {"dev", "gui"} or "semantics" in extras:
               raise SystemExit(f"unexpected release extras: {sorted(extras)!r}")
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          if "## 0.3.0 - 2026-09-03" not in changelog:
-              raise SystemExit("CHANGELOG.md is missing the final 0.3.0 release heading")
+          if "## 0.3.1 - 2026-09-03" not in changelog:
+              raise SystemExit("CHANGELOG.md is missing the final 0.3.1 release heading")
       - name: Build and check distributions
         run: |
           python -m pip install --upgrade pip
@@ -106,7 +106,7 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          version = "0.3.0"
+          version = "0.3.1"
           expected = [
               f"anyfileio-{version}-py3-none-any.whl",
               f"anyfileio-{version}.tar.gz",
@@ -179,10 +179,10 @@ jobs:
       - name: Upload validated distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: anyfileio-0.3.0-distributions
+          name: anyfileio-0.3.1-distributions
           path: |
-            dist/anyfileio-0.3.0-py3-none-any.whl
-            dist/anyfileio-0.3.0.tar.gz
+            dist/anyfileio-0.3.1-py3-none-any.whl
+            dist/anyfileio-0.3.1.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -201,7 +201,7 @@ jobs:
       - name: Download validated distributions
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: anyfileio-0.3.0-distributions
+          name: anyfileio-0.3.1-distributions
           path: dist
       - name: Require the exact publication set
         shell: python
@@ -209,8 +209,8 @@ jobs:
           from pathlib import Path
 
           expected = {
-              "anyfileio-0.3.0-py3-none-any.whl",
-              "anyfileio-0.3.0.tar.gz",
+              "anyfileio-0.3.1-py3-none-any.whl",
+              "anyfileio-0.3.1.tar.gz",
           }
           actual = {path.name for path in Path("dist").iterdir() if path.is_file()}
           if actual != expected:
