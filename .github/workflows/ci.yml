@@ -59,47 +59,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@dd954f088a4cb95e267280cc4777b09e16232bd9"
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@27e428188a891705288fef82bab0b166e330aff2"
-      - run: python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2"
+      - run: python -m pip install --only-binary=:all: "ANYgeometry[planar]==0.4.3" "ANYmesher==0.5.0" "ANYmaterial==0.2.0"
       - run: python -m pip install -e ".[dev]"
-      - name: Verify immutable semantic owners
+      - name: Verify published semantic owners
         shell: python
         run: |
           import importlib
           from importlib import metadata
-          import json
           import os
           from pathlib import Path
+          import subprocess
           import sys
 
           expected = (
-              (
-                  "ANYgeometry",
-                  "0.4.2",
-                  "anygeometry",
-                  "https://github.com/audunarn/ANYgeometry.git",
-                  "dd954f088a4cb95e267280cc4777b09e16232bd9",
-              ),
-              (
-                  "ANYmesher",
-                  "0.4.0",
-                  "anymesher",
-                  "https://github.com/audunarn/ANYmesh.git",
-                  "27e428188a891705288fef82bab0b166e330aff2",
-              ),
-              (
-                  "ANYmaterial",
-                  "0.2.0",
-                  "anymaterial",
-                  "https://github.com/audunarn/ANYmaterial.git",
-                  "d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2",
-              ),
+              ("ANYgeometry", "0.4.3", "anygeometry"),
+              ("ANYmesher", "0.5.0", "anymesher"),
+              ("ANYmaterial", "0.2.0", "anymaterial"),
           )
           workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
           environment = Path(sys.prefix).resolve()
 
-          for distribution_name, version, module_name, repository, commit in expected:
+          for distribution_name, version, module_name in expected:
               distribution = metadata.distribution(distribution_name)
               assert distribution.version == version
 
@@ -107,17 +87,12 @@ jobs:
               origin = Path(module.__file__).resolve()
               assert not origin.is_relative_to(workspace)
               assert origin.is_relative_to(environment)
+              assert distribution.read_text("direct_url.json") is None
 
-              direct_url_text = distribution.read_text("direct_url.json")
-              assert direct_url_text is not None
-              direct_url = json.loads(direct_url_text)
-              assert set(direct_url) == {"url", "vcs_info"}
-              assert direct_url["url"] == repository
-              assert direct_url["vcs_info"] == {
-                  "vcs": "git",
-                  "requested_revision": commit,
-                  "commit_id": commit,
-              }
+          assert "ANYgeometry[planar]<0.5,>=0.4.3" in (
+              metadata.requires("ANYmesher") or ()
+          )
+          subprocess.run([sys.executable, "-m", "pip", "check"], check=True)
 
           import anyfileio
           print(anyfileio.__version__)

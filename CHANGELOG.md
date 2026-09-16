@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2 - 2026-09-16
+
+Fixed:
+
+- Admit the production-published ANYmesher 0.5 line at the existing lazy
+  semantic-operation boundary by widening only its upper bound to `<0.6`.
+- Qualify semantic operations against ANYgeometry 0.4.3, ANYmesher 0.5.0, and
+  ANYmaterial 0.2.0 wheels on Windows and Linux for Python 3.11 through 3.14.
+
+Unchanged:
+
+- The base wheel remains NumPy-only and publishes no semantic extra. Native CAD
+  providers remain deferred, and all existing typed diagnostics and lower
+  compatibility bounds are preserved.
+
 ## 0.3.1 - 2026-09-03
 
 Fixed:

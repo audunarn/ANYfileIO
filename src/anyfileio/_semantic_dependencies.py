@@ -10,8 +10,8 @@ from typing import Any, Callable
 from .diagnostics import FemDiagnostic, SemanticDependencyError
 
 _SETUP_HINT = (
-    "semantic operations are source-development-only in ANYfileio 0.3.1; "
-    "see https://github.com/audunarn/ANYfileIO#development"
+    "semantic operations require separately installed compatible owners in ANYfileio 0.3.2; "
+    "install ANYmesher>=0.2,<0.6 and ANYmaterial>=0.1,<0.3"
 )
 _NUMERIC_RELEASE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 
@@ -25,7 +25,7 @@ class _SemanticCapabilities:
 
 
 _DISTRIBUTIONS = (
-    ("ANYmesher", "anymesher", (0, 2), (0, 5), ("Mesh",)),
+    ("ANYmesher", "anymesher", (0, 2), (0, 6), ("Mesh",)),
     (
         "ANYmaterial",
         "anymaterial",

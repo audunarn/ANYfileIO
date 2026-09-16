@@ -134,8 +134,8 @@ def test_runtime_dependency_license_inventory_is_complete_and_permissive() -> No
     inventory = json.loads(_repository_text("dependency-licenses.json"))
     assert inventory == {
         "schema_version": 1,
-        "release": "ANYfileio 0.3.1",
-        "observed_on": "2026-09-03",
+        "release": "ANYfileio 0.3.2",
+        "observed_on": "2026-09-16",
         "dependencies": [
             {
                 "distribution": "numpy",
@@ -252,52 +252,43 @@ def test_ci_separates_numpy_only_base_from_semantics() -> None:
     assert "git+https://" not in jobs["wheel"]
 
 
-def test_semantics_ci_freezes_owner_sources_and_pep610_provenance() -> None:
+def test_semantics_ci_qualifies_published_owner_wheels() -> None:
     semantics = _workflow_jobs()["semantics"]
-    installs = (
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYgeometry.git@dd954f088a4cb95e267280cc4777b09e16232bd9"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmesh.git@27e428188a891705288fef82bab0b166e330aff2"',
-        'python -m pip install --no-deps "git+https://github.com/audunarn/ANYmaterial.git@d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2"',
+    install = (
+        'python -m pip install --only-binary=:all: "ANYgeometry[planar]==0.4.3" '
+        '"ANYmesher==0.5.0" "ANYmaterial==0.2.0"'
     )
-    positions = [semantics.index(command) for command in installs]
-    assert positions == sorted(positions)
+    assert install in semantics
     assert 'python -m pip install -e ".[dev]"' in semantics
     assert "[dev,semantics]" not in semantics
     assert "--index" not in semantics
     assert "--extra-index-url" not in semantics
+    assert "git+https://" not in semantics
 
-    assert re.findall(r'"(git\+https://[^\"]+)"', semantics) == [
-        command.split('"', 1)[1].rsplit('"', 1)[0] for command in installs
-    ]
-    for version in ("0.4.2", "0.4.0", "0.2.0"):
+    for version in ("0.4.3", "0.5.0", "0.2.0"):
         assert version in semantics
     assert 'Path(os.environ["GITHUB_WORKSPACE"]).resolve()' in semantics
     assert "Path(sys.prefix).resolve()" in semantics
     assert "not origin.is_relative_to(workspace)" in semantics
     assert "origin.is_relative_to(environment)" in semantics
-    assert 'distribution.read_text("direct_url.json")' in semantics
-    assert 'set(direct_url) == {"url", "vcs_info"}' in semantics
-    assert 'direct_url["url"] == repository' in semantics
-    assert 'direct_url["vcs_info"] == {' in semantics
-    assert '"requested_revision": commit' in semantics
-    assert '"commit_id": commit' in semantics
+    assert 'distribution.read_text("direct_url.json") is None' in semantics
+    assert 'metadata.requires("ANYmesher")' in semantics
+    assert 'subprocess.run([sys.executable, "-m", "pip", "check"], check=True)' in semantics
 
 
-def test_dependency_matrix_keeps_source_and_wheel_evidence_separate() -> None:
+def test_dependency_matrix_records_published_semantic_qualification() -> None:
     matrix = _repository_text("DEPENDENCY_MATRIX.md")
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
-    for commit in (
-        "dd954f088a4cb95e267280cc4777b09e16232bd9",
-        "27e428188a891705288fef82bab0b166e330aff2",
-        "d8a233ef4c5e38d25dbba0eb20e6cfa8d44ec5a2",
+    assert "`ANYfileio` | `0.3.2` | `numpy>=1.26`" in matrix
+    for requirement in (
+        "ANYgeometry[planar]==0.4.3",
+        "ANYmesher==0.5.0",
+        "ANYmaterial==0.2.0",
     ):
-        assert commit in matrix
-    assert "`ANYfileio` | `0.3.1` | `numpy>=1.26`" in matrix
-    assert "MPL-2.0 release candidate" in matrix
-    assert "Source CI only; installed-wheel/release claim deferred" in matrix
+        assert requirement in matrix
+    assert "Published-wheel semantic qualification" in matrix
     assert "Required before PyPI Trusted Publishing" in matrix
-    assert "These are source-cell inputs, not built-wheel, resolver, or release evidence." in matrix
 
 
 def test_release_workflow_uses_manual_trusted_publishing() -> None:
@@ -316,7 +307,7 @@ def test_release_workflow_uses_manual_trusted_publishing() -> None:
     assert "test.pypi.org" not in workflow
     assert "refs/heads/main" in workflow
     assert "expected release version {version}" in workflow
-    assert 'version = "0.3.1"' in workflow
+    assert 'version = "0.3.2"' in workflow
     assert "anyfileio-{version}-py3-none-any.whl" in workflow
     assert "anyfileio-{version}.tar.gz" in workflow
     assert "unexpected runtime requirements" in workflow
@@ -335,8 +326,8 @@ def test_public_release_claims_are_numpy_only() -> None:
     changelog = _repository_text("CHANGELOG.md")
     assert "ANYfileio[semantics]" not in readme
     assert "ANYfileio[semantics]" not in changelog
-    assert "## 0.3.1 - 2026-09-03" in changelog
-    assert "does not publish the semantic mesh/material owners" in readme
+    assert "## 0.3.2 - 2026-09-16" in changelog
+    assert "does not bundle\nthe semantic mesh/material owners" in readme
     assert "no native OCCT provider" in changelog
     assert "Mozilla Public License 2.0" in readme
     assert "Earlier releases remain available under the license terms" in readme
