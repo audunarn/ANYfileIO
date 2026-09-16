@@ -59,7 +59,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install --only-binary=:all: "ANYgeometry[planar]==0.4.3" "ANYmesher==0.5.0" "ANYmaterial==0.2.0"
+      - run: 'python -m pip install --only-binary=:all: "ANYgeometry[planar]==0.4.3" "ANYmesher==0.5.0" "ANYmaterial==0.2.0"'
       - run: python -m pip install -e ".[dev]"
       - name: Verify published semantic owners
         shell: python
