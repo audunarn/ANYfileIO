@@ -50,6 +50,7 @@ __all__ = [
     "CancellationCheck",
     "FormatDescriptor",
     "LengthUnit",
+    "cad_import_document_id",
 ]
 
 
@@ -390,6 +391,37 @@ class CadReadOptions:
         _require_bool(self.heal, "heal")
         if self.source_length_unit_override is not None:
             object.__setattr__(self, "source_length_unit_override", _normalize_length_unit(self.source_length_unit_override))
+
+
+def cad_import_document_id(
+    *, source_sha256: str, source_format: str,
+    effective_source_length_unit: str, heal: bool = False,
+    backend_id: str = "occt", backend_compatibility_version: int = 1,
+) -> str:
+    """Canonical protocol-1 import identity shared by core and providers.
+
+    Execution mode, filename and preview options do not change source topology.
+    Units and healing do. Inputs must already use the normalized core vocabulary.
+    """
+    if not isinstance(source_sha256, str) or not _SHA256_RE.fullmatch(source_sha256):
+        raise ValueError("source_sha256 must be a lower-case SHA-256 digest")
+    if source_format not in _SOURCE_FORMATS:
+        raise ValueError("source_format must be step, iges or brep")
+    if effective_source_length_unit not in {*_UNIT_SCALES, "unknown"}:
+        raise ValueError("effective source unit must be canonical or unknown")
+    _require_bool(heal, "heal")
+    _require_nonempty_string(backend_id, "backend_id")
+    _require_positive_int(backend_compatibility_version, "backend_compatibility_version")
+    payload = {
+        "backend_compatibility_version": backend_compatibility_version,
+        "backend_id": backend_id,
+        "effective_source_length_unit": effective_source_length_unit,
+        "heal": heal, "identity_kind": "import", "identity_version": 1,
+        "source_format": source_format, "source_sha256": source_sha256,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return f"cad-import-v1:{hashlib.sha256(encoded).hexdigest()}"
 
 
 @dataclass(frozen=True, slots=True)

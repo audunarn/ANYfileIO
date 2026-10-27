@@ -55,7 +55,14 @@ def _read_inp(path: Path, **options: Any) -> Any:
     return summarize_deck(path, **options)
 
 
+def _read_geometry(path: Path, **options: Any) -> Any:
+    from .geometry import read_geometry
+    return read_geometry(path, **options)
+
+
 READERS: Mapping[str, Tuple[Callable[..., Any], str]] = {
+    ".anygeometry.json": (_read_geometry, "ANYgeometry editable geometry document"),
+    ".anygeometry.json.gz": (_read_geometry, "Compressed ANYgeometry editable geometry document"),
     ".fem": (_read_fem, "SESAM formatted FEM model"),
     ".sif": (_read_sif, "SESAM SIF results"),
     ".frd": (_read_frd, "CalculiX FRD results"),
@@ -64,6 +71,7 @@ READERS: Mapping[str, Tuple[Callable[..., Any], str]] = {
 }
 
 _BUILTIN_FORMATS = (
+    FormatDescriptor("anygeometry", (".anygeometry.json", ".anygeometry.json.gz"), "editable_geometry", frozenset({"read", "write", "inspect"})),
     FormatDescriptor("calculix-dat", (".dat",), "finite_element_results", frozenset({"read", "inspect"})),
     FormatDescriptor("sesam-fem", (".fem",), "finite_element_model", frozenset({"read", "inspect"})),
     FormatDescriptor("calculix-frd", (".frd",), "finite_element_results", frozenset({"read", "inspect"})),
@@ -139,17 +147,32 @@ def _has_capability(descriptor: FormatDescriptor, capabilities: Any) -> bool:
 def available_formats() -> tuple[FormatDescriptor, ...]:
     """Formats usable from built-ins or an already-ready CAD provider."""
 
+    from importlib.util import find_spec
+    builtin = tuple(item for item in _BUILTIN_FORMATS if item.name != "anygeometry" or find_spec("anygeometry") is not None)
     status = backend_status()
     if status.state != "ready" or status.capabilities is None:
-        return tuple(sorted(_BUILTIN_FORMATS, key=lambda item: item.name))
-    cad = tuple(item for item in _CAD_FORMATS if _has_capability(item, status.capabilities))
-    return tuple(sorted((*_BUILTIN_FORMATS, *cad), key=lambda item: item.name))
+        return tuple(sorted(builtin, key=lambda item: item.name))
+    from dataclasses import replace
+    candidates = tuple(
+        replace(item, capabilities=item.capabilities - {"assembly"})
+        if not status.capabilities.assembly else item for item in _CAD_FORMATS
+    )
+    cad = tuple(item for item in candidates if _has_capability(item, status.capabilities))
+    return tuple(sorted((*builtin, *cad), key=lambda item: item.name))
+
+
+def _suffix(path: Path) -> str:
+    name = path.name.casefold()
+    for suffix in (".anygeometry.json.gz", ".anygeometry.json"):
+        if name.endswith(suffix):
+            return suffix
+    return path.suffix.casefold()
 
 
 def describe(path: str | Path) -> str:
     """What :func:`read` would treat this file as."""
 
-    suffix = Path(path).suffix.lower()
+    suffix = _suffix(Path(path))
     descriptor = _SUFFIX_INDEX.get(suffix)
     if descriptor is None:
         raise FileFormatError(
@@ -170,7 +193,7 @@ def read(path: str | Path, **options: Any) -> Any:
     """
 
     target = Path(path)
-    suffix = target.suffix.lower()
+    suffix = _suffix(target)
     entry = READERS.get(suffix)
     if entry is None:
         descriptor = _SUFFIX_INDEX.get(suffix)
