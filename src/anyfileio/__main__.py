@@ -75,7 +75,39 @@ def _command_formats(args: argparse.Namespace) -> int:
 
 def _command_inspect(args: argparse.Namespace) -> int:
     suffix = Path(args.input).suffix.lower()
-    if suffix == ".fem":
+    if Path(args.input).name.casefold().endswith((".anygeometry.json", ".anygeometry.json.gz")):
+        from .geometry import read_geometry
+        result = read_geometry(args.input)
+        geometry = result.geometry
+        summary = {
+            "source": str(args.input), "format": result.report.format,
+            "model_id": str(geometry.model_id), "revision": geometry.revision,
+            "units": geometry.units, "source_sha256": result.report.source_sha256,
+            **{name: len(getattr(geometry, name)) for name in
+               ("vertices", "edges", "faces", "parts", "sheets", "members")},
+            "diagnostics": [],
+        }
+    elif suffix in (".step", ".stp", ".iges", ".igs", ".brep"):
+        from .cad import CadReadOptions
+        from .cad_operations import read_cad
+        document = read_cad(args.input, options=CadReadOptions(
+            mode="manifest_only", retain_source=False,
+            source_length_unit_override=args.source_unit))
+        try:
+            manifest = document.manifest
+            summary = {
+                "source": str(args.input), "format": manifest.source_format,
+                "source_sha256": manifest.source_sha256,
+                "source_unit": manifest.source_length_unit,
+                "internal_unit": manifest.internal_length_unit,
+                "topology_counts": dict(manifest.topology_counts),
+                "prototypes": len(manifest.prototypes), "occurrences": len(manifest.occurrences),
+                "diagnostics": [dict(code=item.code, severity=item.severity, message=item.message)
+                                for item in manifest.diagnostics],
+            }
+        finally:
+            document.close()
+    elif suffix == ".fem":
         document = read_sesam_fem_document(args.input, strict=args.strict)
         summary = _document_summary(document)
     elif suffix == ".sif":
@@ -181,6 +213,46 @@ def _command_convert(args: argparse.Namespace) -> int:
     return _command_roundtrip(args)
 
 
+def _command_geometry(args: argparse.Namespace) -> int:
+    from dataclasses import fields, is_dataclass
+    from .geometry import GeometryReadOptions, GeometryWriteOptions, read_geometry, write_geometry
+    if Path(args.output).exists() and not args.overwrite:
+        raise FileExistsError(f"destination exists: {args.output}; use --overwrite")
+    fidelity = "approximate" if args.allow_approximation else "exact"
+    common = dict(fidelity=fidelity, max_deviation_m=args.max_deviation_m,
+                  max_segments=args.max_segments, max_depth=args.max_depth,
+                  max_topology_work=args.max_topology_work,
+                  validation_mode="certified" if args.certified else "committed")
+    imported = read_geometry(args.input, options=GeometryReadOptions(
+        source_length_unit_override=args.source_unit, **common))
+    report = write_geometry(args.output, imported.geometry, options=GeometryWriteOptions(
+        output_length_unit=args.output_unit, **common))
+    def record(value):
+        if is_dataclass(value):
+            return {field.name: record(getattr(value, field.name)) for field in fields(value)}
+        if isinstance(value, (tuple, list)):
+            return [record(item) for item in value]
+        return value
+    payload = {
+        "input_format": imported.report.format, "output_format": report.format,
+        "model_id": str(report.source_model_id), "revision": report.source_revision,
+        "output_sha256": report.output_sha256,
+        "output_document_id": report.output_document_id,
+        "approximations": [record(item) for item in (*imported.report.approximations, *report.approximations)],
+        "metadata_losses": list((*imported.report.metadata_losses, *report.metadata_losses)),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"{args.output}: {report.format}, SHA-256 {report.output_sha256}")
+        for loss in payload["metadata_losses"]:
+            print(f"  metadata loss: {loss}")
+        for approximation in payload["approximations"]:
+            print(f"  approximation: {approximation['method']}; bound {approximation['bound_m']} m "
+                  f"(limit {approximation['max_deviation_m']} m)")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="anyfileio", description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -195,6 +267,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     inspect = sub.add_parser("inspect", help="show a summary of any supported file")
     inspect.add_argument("input")
+    inspect.add_argument("--source-unit", help="explicit CAD units when the source does not declare them")
 
     validate = sub.add_parser("validate", help="validate a SESAM FEM file")
     validate.add_argument("input")
@@ -210,6 +283,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     convert.add_argument("output")
     convert.add_argument("--overwrite", action="store_true")
 
+    geometry = sub.add_parser("geometry-convert", help="convert editable native/CAD geometry")
+    geometry.add_argument("input")
+    geometry.add_argument("output")
+    geometry.add_argument("--overwrite", action="store_true")
+    geometry.add_argument("--source-unit")
+    geometry.add_argument("--output-unit")
+    geometry.add_argument("--certified", action="store_true")
+    geometry.add_argument("--allow-approximation", action="store_true")
+    geometry.add_argument("--max-deviation-m", type=float)
+    geometry.add_argument("--max-segments", type=int, default=10000, help="bound approximation work")
+    geometry.add_argument("--max-depth", type=int, default=24, help="bound approximation subdivision depth")
+    geometry.add_argument("--max-topology-work", type=int, default=1000000,
+                          help="bound CAD topology verification work independently of fitting")
+
     summary = sub.add_parser("summary", help="resolve a SESAM FEM file into neutral records")
     summary.add_argument("input")
 
@@ -222,10 +309,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "roundtrip": _command_roundtrip,
         "convert": _command_convert,
         "summary": _command_summary,
+        "geometry-convert": _command_geometry,
     }
     try:
         return handlers[args.command](args)
     except (FileExistsError, FileNotFoundError, FileFormatError, OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    except RuntimeError as error:
+        from .cad import CadError
+        if not isinstance(error, CadError):
+            raise
         print(f"error: {error}", file=sys.stderr)
         return 2
 

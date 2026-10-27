@@ -1,5 +1,13 @@
 # ANYfileio
 
+Editable geometry interchange is available through the lazy
+`anyfileio.geometry` facade. Native `.anygeometry.json` and
+`.anygeometry.json.gz` files delegate to ANYgeometry's serializer; CAD
+conversion uses the optional OCCT provider. See the [current contract](docs/GEOMETRY_INTERCHANGE.md)
+and [coverage/evidence matrix](docs/GEOMETRY_INTERCHANGE_COVERAGE.md) for implemented
+and verified scope. `anyfileio geometry-convert input.anygeometry.json output.brep`
+uses exact conversion by default and reports unsupported geometry explicitly.
+
 Reading and writing structural finite-element interchange files: SESAM formatted
 FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`,
 `.dat`), with a tkinter inspector and a command-line interface.
@@ -157,9 +165,10 @@ python -m pytest
 The 0.3.2 PyPI distribution remains the NumPy-only base and publishes no
 `semantics` extra. The published versions above are qualified together on
 Windows and Linux for Python 3.11 through 3.14, while imports remain lazy and
-provider-free until a semantic operation executes. Native OCCT-backed CAD
-operations are still deferred. CAD-neutral records and preview artifacts remain
-part of the released base.
+provider-free until a semantic operation executes. The current source candidate
+adds editable native/CAD interchange with the separately installed OCCT provider;
+its checked scope and limits are recorded in the geometry coverage matrix.
+CAD-neutral records and preview artifacts remain part of the released base.
 
 To open the inspector straight from a checkout — including an IDE's Run button —
 run [`run_gui.py`](run_gui.py) at the repository root, optionally with a file to

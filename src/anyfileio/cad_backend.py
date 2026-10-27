@@ -196,7 +196,6 @@ def _required_capabilities(capabilities: CadCapabilities) -> bool:
         and {"step", "iges"} <= capabilities.write_formats
         and _IMPORT_MODES <= capabilities.import_modes
         and capabilities.inspect
-        and capabilities.assembly
         and capabilities.tessellate
         and capabilities.preserve
         and capabilities.translate
