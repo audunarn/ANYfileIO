@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -151,6 +152,13 @@ class SesamFemDocument:
     load_records: tuple[FemLoadRecord, ...]
     unknown_records: tuple[FemRawRecord, ...]
     diagnostics: tuple[FemDiagnostic, ...] = ()
+    # Internal -> external numbering from GNODE/GELMNT1.  Nodes, elements,
+    # element references and boundaries are keyed by external IDs; load records
+    # stay raw, so consumers resolve their internal IDs through these maps.
+    node_internal_to_external: Mapping[int, int] = field(default_factory=dict)
+    element_internal_to_external: Mapping[int, int] = field(default_factory=dict)
+    # GECCEN eccentricity vectors (global components), keyed by ECCNO.
+    eccentricities: Mapping[int, tuple[float, float, float]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, object]:
         return {
@@ -211,10 +219,14 @@ def parse_sesam_fem_records(
     unit_vectors = _parse_unit_vectors(raw_records, diagnostics)
     coordinate_transforms = _parse_coordinate_transforms(raw_records, diagnostics)
     known_transform_ids = set(unit_vectors) | set(coordinate_transforms)
-    nodes = _parse_nodes(raw_records, diagnostics)
+    node_map = _parse_node_identity(raw_records, diagnostics)
+    nodes = _parse_nodes(raw_records, diagnostics, node_map)
+    element_map = _parse_element_identity(raw_records, diagnostics)
     element_references = _parse_element_references(raw_records, diagnostics, known_transform_ids)
-    elements = _parse_elements(raw_records, element_references, diagnostics)
-    boundaries = _parse_boundaries(raw_records, diagnostics)
+    element_references = _resolve_reference_namespace(element_references, element_map, raw_records, diagnostics)
+    elements = _parse_elements(raw_records, element_references, diagnostics, node_map)
+    boundaries = _parse_boundaries(raw_records, diagnostics, node_map)
+    eccentricities = _parse_eccentricities(raw_records, diagnostics)
     concepts = _parse_concepts(raw_records, diagnostics)
     dependencies = _parse_dependencies(raw_records)
     load_records = _parse_loads(raw_records, diagnostics)
@@ -252,6 +264,9 @@ def parse_sesam_fem_records(
         load_records=load_records,
         unknown_records=unknown_records,
         diagnostics=tuple(diagnostics),
+        node_internal_to_external=node_map,
+        element_internal_to_external=element_map,
+        eccentricities=eccentricities,
     )
     if strict:
         from .validation import validate_sesam_fem_document
@@ -291,13 +306,35 @@ def _parse_materials(
             if material_id in materials:
                 diagnostics.append(_diag("FEM102", f"duplicate material id {material_id}", record))
                 continue
+            values = record.numeric_fields
+            # Non-numeric tokens (NaN, Inf, stray text) are dropped by the numeric
+            # scan, which would shift every later slot; refuse rather than guess.
+            if record.text_fields or _has_nonfinite_token(record) or not all(math.isfinite(x) for x in values):
+                diagnostics.append(
+                    _diag("FEM101", f"MISOSEL material {material_id} has non-numeric or non-finite fields", record)
+                )
+                continue
+            # MISOSEL: MATNO YOUNG POISS RHO DAMP ALPHA ...  With the full layout
+            # the slots are read as written, so an explicit nu = 0 stays 0.  Short
+            # legacy records keep the range heuristic.
+            explicit = len(values) >= 8
+            if explicit:
+                if any(values[8:]) or values[1] <= 0.0 or values[3] <= 0.0 or not -1.0 < values[2] < 0.5:
+                    diagnostics.append(
+                        _diag(
+                            "FEM101",
+                            f"MISOSEL material {material_id} has invalid E/nu/rho slots or nonzero trailing options",
+                            record,
+                        )
+                    )
+                    continue
             materials[material_id] = FemMaterial(
                 material_id=material_id,
-                elastic_modulus=_first_in_range(record.numeric_fields[1:], 1.0e7, 1.0e13),
-                poisson_ratio=_first_in_range(record.numeric_fields[1:], 0.0, 0.5),
-                density=_first_in_range(record.numeric_fields[1:], 10.0, 50000.0),
-                yield_stress=_first_in_range(record.numeric_fields[1:], 1.0e6, 5.0e9),
-                raw_values=record.numeric_fields,
+                elastic_modulus=float(values[1]) if explicit else _first_in_range(values[1:], 1.0e7, 1.0e13),
+                poisson_ratio=float(values[2]) if explicit else _first_in_range(values[1:], 0.0, 0.5),
+                density=float(values[3]) if explicit else _first_in_range(values[1:], 10.0, 50000.0),
+                yield_stress=_first_in_range(values[1:], 1.0e6, 5.0e9),
+                raw_values=values,
             )
         elif record.name == "TDMATER" and record.numeric_fields:
             material_id = _int_field(record.numeric_fields[0], "material id", record, diagnostics)
@@ -502,7 +539,73 @@ def _parse_coordinate_transforms(
     return transforms
 
 
-def _parse_nodes(records: tuple[FemRawRecord, ...], diagnostics: list[FemDiagnostic]) -> dict[int, FemNode]:
+def _parse_node_identity(
+    records: tuple[FemRawRecord, ...],
+    diagnostics: list[FemDiagnostic],
+) -> dict[int, int]:
+    """GNODE internal -> external node numbering, for GCOORD-structured files.
+
+    With GCOORD present, GNODE is ``NODEX NODENO NDOF ODOF`` (external id,
+    internal id, DOF layout) and carries no coordinates.  Files without GCOORD
+    keep the legacy coordinate-bearing GNODE layout and get no map.
+    """
+
+    if not any(record.name == "GCOORD" for record in records):
+        return {}
+    node_map: dict[int, int] = {}
+    externals: set[int] = set()
+    for record in records:
+        if record.name != "GNODE":
+            continue
+        values = record.numeric_fields
+        if len(values) != 4:
+            diagnostics.append(_diag("FEM101", "structured GNODE must be NODEX NODENO NDOF ODOF", record))
+            return {}
+        external = _int_field(values[0], "external node id", record, diagnostics)
+        internal = _int_field(values[1], "internal node id", record, diagnostics)
+        ndof = _int_field(values[2], "GNODE NDOF", record, diagnostics)
+        odof = _int_field(values[3], "GNODE ODOF", record, diagnostics)
+        if external is None or internal is None or ndof is None or odof is None:
+            return {}
+        if external <= 0 or internal <= 0:
+            diagnostics.append(_diag("FEM101", "GNODE node ids must be positive", record))
+            return {}
+        if internal in node_map:
+            diagnostics.append(_diag("FEM102", f"duplicate GNODE internal node id {internal}", record))
+            return {}
+        if external in externals:
+            diagnostics.append(_diag("FEM102", f"duplicate GNODE external node id {external}", record))
+            return {}
+        node_map[internal] = external
+        externals.add(external)
+    if node_map:
+        coordinate_ids = set()
+        for record in records:
+            if record.name == "GCOORD" and record.numeric_fields:
+                try:
+                    coordinate_ids.add(strict_int(record.numeric_fields[0], field_name="node id", record=record))
+                except SesamFemError:
+                    pass  # Reported by the GCOORD node pass.
+        if coordinate_ids != set(node_map):
+            diagnostics.append(
+                FemDiagnostic(
+                    "FEM105",
+                    "GNODE internal ids and GCOORD node ids do not cover the same nodes",
+                    context={
+                        "gcoord_only": sorted(coordinate_ids - set(node_map))[:20],
+                        "gnode_only": sorted(set(node_map) - coordinate_ids)[:20],
+                    },
+                )
+            )
+            return {}
+    return node_map
+
+
+def _parse_nodes(
+    records: tuple[FemRawRecord, ...],
+    diagnostics: list[FemDiagnostic],
+    node_map: Mapping[int, int],
+) -> dict[int, FemNode]:
     nodes: dict[int, FemNode] = {}
     for record in records:
         if record.name != "GCOORD":
@@ -517,12 +620,23 @@ def _parse_nodes(records: tuple[FemRawRecord, ...], diagnostics: list[FemDiagnos
         if node_id in nodes:
             diagnostics.append(_diag("FEM102", f"duplicate node id {node_id}", record))
             continue
+        if not all(math.isfinite(x) for x in values[1:4]):
+            diagnostics.append(_diag("FEM101", f"node {node_id} has non-finite coordinates", record))
+            continue
         nodes[node_id] = FemNode(
             node_id=node_id,
             coordinate_system_id=0,
             coordinates=(float(values[1]), float(values[2]), float(values[3])),
             raw_values=values,
         )
+
+    if node_map:
+        # GCOORD ids are internal; key the nodes by the external numbering.
+        # The GNODE records are identity records here, not coordinates.
+        return {
+            node_map[internal]: replace(node, node_id=node_map[internal])
+            for internal, node in nodes.items()
+        }
 
     for record in records:
         if record.name != "GNODE":
@@ -581,6 +695,9 @@ def _parse_element_references(
             else None
         )
         nodal_transform_ids = _parse_nodal_transform_references(values, record, diagnostics, known_transform_ids)
+        if element_id in references:
+            diagnostics.append(_diag("FEM102", f"duplicate GELREF1 element id {element_id}", record))
+            continue
         references[element_id] = FemElementReference(
             element_id,
             material_id,
@@ -624,10 +741,99 @@ def _parse_nodal_transform_references(
             transform_ids.append(reference)
     return tuple(transform_ids)
 
+
+def _parse_element_identity(
+    records: tuple[FemRawRecord, ...],
+    diagnostics: list[FemDiagnostic],
+) -> dict[int, int]:
+    """GELMNT1 internal -> external element numbering (``ELNOX ELNO ELTYP ...``).
+
+    Only the full layout carries an internal number; the compact legacy layout
+    (type code in slot 1) and ``ELNO = 0`` contribute nothing.
+    """
+
+    element_map: dict[int, int] = {}
+    externals: set[int] = set()
+    for record in records:
+        if record.name != "GELMNT1":
+            continue
+        values = record.numeric_fields
+        if len(values) < 4:
+            continue  # Reported by the element pass.
+        layout = _element_layout(record, [])
+        if layout is None or layout[1] != 4:
+            continue
+        external = _int_field(values[0], "external element id", record, diagnostics)
+        internal = _int_field(values[1], "internal element id", record, diagnostics)
+        if external is None or internal is None:
+            return {}
+        if internal == 0:
+            continue
+        if external <= 0 or internal < 0:
+            diagnostics.append(_diag("FEM101", "GELMNT1 element ids must be positive", record))
+            return {}
+        if internal in element_map:
+            diagnostics.append(_diag("FEM102", f"duplicate GELMNT1 internal element id {internal}", record))
+            return {}
+        if external in externals:
+            diagnostics.append(_diag("FEM102", f"duplicate GELMNT1 external element id {external}", record))
+            return {}
+        element_map[internal] = external
+        externals.add(external)
+    return element_map
+
+
+def _resolve_reference_namespace(
+    references: dict[int, FemElementReference],
+    element_map: Mapping[int, int],
+    records: tuple[FemRawRecord, ...],
+    diagnostics: list[FemDiagnostic],
+) -> dict[int, FemElementReference]:
+    """Key GELREF1 records by external element id.
+
+    GELREF1 ``ELNO`` is the internal number.  Legacy writers sometimes put the
+    external one there instead, so the namespace is decided once for the whole
+    file -- never per element -- and a file consistent with both readings but
+    disagreeing between them is refused.
+    """
+
+    if not element_map or not references:
+        return references
+    keys = set(references)
+    internal_mode = keys <= set(element_map)
+    external_mode = keys <= set(element_map.values())
+    if internal_mode and external_mode and any(element_map[key] != key for key in keys):
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM102",
+                "GELREF1 element ids are ambiguous between internal and external numbering",
+                record_name="GELREF1",
+            )
+        )
+        return {}
+    if internal_mode:
+        return {
+            element_map[key]: replace(reference, element_id=element_map[key])
+            for key, reference in references.items()
+        }
+    if external_mode:
+        return references
+    diagnostics.append(
+        FemDiagnostic(
+            "FEM105",
+            "GELREF1 element ids resolve to neither internal nor external GELMNT1 numbering",
+            record_name="GELREF1",
+            context={"unresolved": sorted(keys - set(element_map) - set(element_map.values()))[:20]},
+        )
+    )
+    return {}
+
+
 def _parse_elements(
     records: tuple[FemRawRecord, ...],
     references: Mapping[int, FemElementReference],
     diagnostics: list[FemDiagnostic],
+    node_map: Mapping[int, int],
 ) -> dict[int, FemElement]:
     elements: dict[int, FemElement] = {}
     for record in records:
@@ -667,13 +873,17 @@ def _parse_elements(
                 node_ids.append(node_id)
         if len(node_ids) != spec.node_count:
             continue
-        internal_id = _int_field(values[1], "element internal id", record, diagnostics) if len(values) > 1 else None
-        if spec.is_shell and internal_id is not None:
-            reference = references.get(internal_id) or references.get(element_id)
-        elif spec.is_beam and internal_id is not None:
-            reference = references.get(element_id) or references.get(internal_id)
-        else:
-            reference = references.get(element_id)
+        if node_map:
+            # Element connectivity uses internal node numbers.
+            unresolved = [node_id for node_id in node_ids if node_id not in node_map]
+            if unresolved:
+                diagnostics.append(
+                    _diag("FEM105", f"element {element_id} references unknown internal nodes {unresolved}", record)
+                )
+                continue
+            node_ids = [node_map[node_id] for node_id in node_ids]
+        # References are already keyed by external id (_resolve_reference_namespace).
+        reference = references.get(element_id)
         elements[element_id] = FemElement(
             element_id=element_id,
             type_code=type_code,
@@ -689,6 +899,7 @@ def _parse_elements(
 def _parse_boundaries(
     records: tuple[FemRawRecord, ...],
     diagnostics: list[FemDiagnostic],
+    node_map: Mapping[int, int],
 ) -> tuple[FemBoundary, ...]:
     boundaries: list[FemBoundary] = []
     for record in records:
@@ -701,6 +912,12 @@ def _parse_boundaries(
         node_id = _int_field(values[0], "boundary node id", record, diagnostics)
         if node_id is None:
             continue
+        if node_map:
+            # BNBCD NODENO is the internal node number.
+            if node_id not in node_map:
+                diagnostics.append(_diag("FEM105", f"boundary references unknown internal node {node_id}", record))
+                continue
+            node_id = node_map[node_id]
         flags = []
         start_index = 2 if len(values) >= 8 else 1
         for value in values[start_index:start_index + 6]:
@@ -716,6 +933,38 @@ def _parse_boundaries(
             )
         )
     return tuple(boundaries)
+
+
+def _parse_eccentricities(
+    records: tuple[FemRawRecord, ...],
+    diagnostics: list[FemDiagnostic],
+) -> dict[int, tuple[float, float, float]]:
+    """GECCEN ``ECCNO EX EY EZ``; the vector is read as written, never inferred."""
+
+    eccentricities: dict[int, tuple[float, float, float]] = {}
+    for record in records:
+        if record.name != "GECCEN":
+            continue
+        values = record.numeric_fields
+        if (
+            len(values) != 4
+            or record.text_fields
+            or _has_nonfinite_token(record)
+            or not all(math.isfinite(x) for x in values)
+        ):
+            diagnostics.append(_diag("FEM101", "GECCEN must be ECCNO EX EY EZ with finite values", record))
+            continue
+        eccentricity_id = _int_field(values[0], "eccentricity id", record, diagnostics)
+        if eccentricity_id is None:
+            continue
+        if eccentricity_id <= 0:
+            diagnostics.append(_diag("FEM101", "GECCEN eccentricity id must be positive", record))
+            continue
+        if eccentricity_id in eccentricities:
+            diagnostics.append(_diag("FEM102", f"duplicate GECCEN eccentricity id {eccentricity_id}", record))
+            continue
+        eccentricities[eccentricity_id] = (float(values[1]), float(values[2]), float(values[3]))
+    return eccentricities
 
 
 def _parse_concepts(records: tuple[FemRawRecord, ...], diagnostics: list[FemDiagnostic]) -> tuple[FemConceptRecord, ...]:
@@ -771,6 +1020,19 @@ def _element_layout(
             return type_code, 4 if index == 2 else 2
     diagnostics.append(_diag("FEM103", "GELMNT1 record does not contain a supported element type", record))
     return None
+
+
+_NONFINITE_TOKENS = {"nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}
+
+
+def _has_nonfinite_token(record: FemRawRecord) -> bool:
+    # The numeric scan drops these tokens, and uppercase ones never reach
+    # text_fields, so they are looked for in the source lines.
+    return any(
+        token.strip(",;").lower() in _NONFINITE_TOKENS
+        for line in record.raw_lines
+        for token in line[8:].split()
+    )
 
 
 def _first_in_range(values: tuple[float, ...], lower: float, upper: float) -> Optional[float]:
