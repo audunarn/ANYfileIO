@@ -125,6 +125,8 @@ def test_beuslo_internal_element_maps_to_external(tmp_path):
 
 
 def test_unknown_beuslo_element_refuses_incomplete_load_case(tmp_path):
+    pytest.importorskip("anymesher")
+    pytest.importorskip("anymaterial")
     from anyfileio import read_sesam_semantics
     specs = _structured_specs()
     index = next(i for i, (name, _) in enumerate(specs) if name == "BEUSLO")
