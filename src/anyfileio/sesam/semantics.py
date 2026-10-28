@@ -102,6 +102,12 @@ class SesamSemantics:
     supports: Tuple[SesamSupport, ...] = ()
     pressure_of_element: Dict[int, float] = field(default_factory=dict)
     gravity: Optional[Tuple[float, float, float]] = None
+    # Per beam node GECCEN vectors (global), for eccentric beams only.
+    offsets_of_element: Dict[int, Tuple[Tuple[float, float, float], ...]] = field(default_factory=dict)
+    # Load case -> external node -> global six-DOF BNLOAD values.
+    nodal_loads_by_case: Dict[int, Dict[int, Tuple[float, ...]]] = field(default_factory=dict)
+    # Load case -> external shell element -> uniform BEUSLO pressure.
+    pressure_by_case: Dict[int, Dict[int, float]] = field(default_factory=dict)
     diagnostics: Tuple[FemDiagnostic, ...] = ()
 
     @property
@@ -310,6 +316,95 @@ def _material_specs(
     return specs
 
 
+def _beam_shear_factors(
+    section: Optional[FemSection], element_id: int, diagnostics: list[FemDiagnostic]
+) -> Dict[str, float]:
+    """GBEAMG SHARY/SHARZ (slots 10/11) as shear factors relative to the area.
+
+    A zero shear area is left out rather than turned into a factor: what a
+    shear-rigid section means is the consumer's choice.
+    """
+
+    if section is None or len(section.raw_values) < 12:
+        return {}
+    shear_areas = {
+        "shear_factor_y": float(section.raw_values[10]),
+        "shear_factor_z": float(section.raw_values[11]),
+    }
+    if not any(value > 0.0 for value in shear_areas.values()):
+        return {}
+    if section.area is None or section.area <= 0.0:
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM126",
+                f"beam element {element_id} section {section.section_id} gives shear areas but no area; "
+                "shear factors not derived",
+                severity="warning",
+                context={"element_id": element_id, "section_id": section.section_id},
+            )
+        )
+        return {}
+    factors: Dict[str, float] = {}
+    for key, shear_area in shear_areas.items():
+        factor = shear_area / float(section.area)
+        if shear_area > 0.0 and np.isfinite(factor):
+            factors[key] = factor
+    return factors
+
+
+def _beam_offsets(
+    document: SesamFemDocument, element: FemElement, diagnostics: list[FemDiagnostic]
+) -> Tuple[bool, Optional[Tuple[Tuple[float, float, float], ...]]]:
+    """GELREF1 ECCNO (slot 10) resolved through GECCEN, one vector per node.
+
+    Returns ``(False, None)`` after an error diagnostic when the reference
+    cannot be resolved; an unresolved offset is never replaced by zero.
+    """
+
+    reference = document.element_references.get(element.element_id)
+    if reference is None or len(reference.raw_values) <= 10:
+        return True, None
+    values = reference.raw_values
+    flag = float(values[10])
+    if flag == 0.0:
+        return True, None
+    node_count = len(element.node_ids)
+    ids: Tuple[int, ...] = ()
+    if flag == int(flag) and flag > 0:
+        ids = (int(flag),) * node_count
+    elif flag == -1.0:
+        # Per-node lists follow slot 11, in GEONO, FIXNO, ECCNO order, and only
+        # for the options set to -1.
+        start = 12 + node_count * sum(1 for index in (8, 9) if float(values[index]) == -1.0)
+        listed = values[start:start + node_count]
+        if len(listed) == node_count and all(value == int(value) and value >= 0 for value in listed):
+            ids = tuple(int(value) for value in listed)
+    if node_count != 2 or len(ids) != node_count:
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM127",
+                f"beam element {element.element_id} eccentricity reference is unsupported "
+                "(two-node beams with ECCNO > 0 or a per-node list only)",
+                context={"element_id": element.element_id, "eccno": flag},
+            )
+        )
+        return False, None
+    missing = [eccentricity_id for eccentricity_id in ids if eccentricity_id and eccentricity_id not in document.eccentricities]
+    if missing:
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM105",
+                f"beam element {element.element_id} references undefined GECCEN {missing}",
+                context={"element_id": element.element_id, "missing_eccentricities": missing},
+            )
+        )
+        return False, None
+    return True, tuple(
+        tuple(document.eccentricities[eccentricity_id]) if eccentricity_id else (0.0, 0.0, 0.0)
+        for eccentricity_id in ids
+    )
+
+
 def _install_elements(
     document: SesamFemDocument, semantics: SesamSemantics, diagnostics: list[FemDiagnostic]
 ) -> None:
@@ -352,11 +447,17 @@ def _install_elements(
                 )
                 semantics.mesh.thickness_of_face[element.section_id] = shell_thickness(section)
         else:
+            resolved, offsets = _beam_offsets(document, element, diagnostics)
+            if not resolved:
+                continue
             semantics.mesh.beams[element.element_id] = connectivity
             properties = beam_section(section)
+            properties.update(_beam_shear_factors(section, element.element_id, diagnostics))
             orientation = beam_orientation(document, element)
             if orientation is not None:
                 properties["orientation"] = orientation
+            if offsets is not None:
+                semantics.offsets_of_element[element.element_id] = offsets
             semantics.section_of_element[element.element_id] = properties
             if element.section_id:
                 semantics.mesh.elements_of_edge.setdefault(element.section_id, []).append(
@@ -433,6 +534,67 @@ def _install_supports(
     semantics.supports = tuple(supports)
 
 
+def _nodal_load(
+    document: SesamFemDocument,
+    semantics: SesamSemantics,
+    load_record: Any,
+    transformed_nodes: bool,
+    diagnostics: list[FemDiagnostic],
+) -> Optional[Tuple[int, int, Tuple[float, ...]]]:
+    """One BNLOAD as ``(case, external node, six global components)``.
+
+    Only the real six-DOF layout ``LLC 1 0 0 NODENO 6 F1..F6`` is translated.
+    Anything else is refused with an error rather than dropped, because a load
+    case missing one of its loads is worse than one the caller knows is absent.
+    """
+
+    raw = load_record.raw_values
+    if (
+        len(raw) != 12
+        or not all(np.isfinite(raw))
+        or raw[0] != int(raw[0])
+        or raw[0] <= 0
+        or tuple(raw[1:4]) != (1.0, 0.0, 0.0)
+        or raw[4] != int(raw[4])
+        or raw[5] != 6.0
+    ):
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM125",
+                "BNLOAD layout is not the supported real six-DOF form",
+                record_name="BNLOAD",
+                context={"raw_values": list(raw[:6])},
+            )
+        )
+        return None
+    if transformed_nodes:
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM125",
+                "BNLOAD on transformed nodes is not translated; components would not be global",
+                record_name="BNLOAD",
+                context={"node_id": int(raw[4])},
+            )
+        )
+        return None
+    # BNLOAD NODENO is the internal node number; files without internal
+    # numbering use one namespace.
+    source_id = int(raw[4])
+    node_map = document.node_internal_to_external
+    node_id = node_map.get(source_id) if node_map else source_id
+    if node_id is None or node_id not in semantics.mesh.nodes:
+        diagnostics.append(
+            FemDiagnostic(
+                "FEM105",
+                f"BNLOAD references unknown node {source_id}",
+                record_name="BNLOAD",
+                context={"node_id": source_id},
+            )
+        )
+        return None
+    return int(raw[0]), int(node_id), tuple(float(value) for value in raw[6:12])
+
+
 def _install_loads(
     document: SesamFemDocument, semantics: SesamSemantics, diagnostics: list[FemDiagnostic]
 ) -> None:
@@ -440,10 +602,28 @@ def _install_loads(
         return
 
     shell_ids = set(semantics.mesh.quads) | set(semantics.mesh.tris)
+    # BNLOAD components are only global when no node carries a transformation.
+    transformed_nodes = any(record.name in {"BNDOF", "BNTRCOS"} for record in document.raw_records) or any(
+        node.coordinate_system_id for node in document.nodes.values()
+    )
     found = False
     for load_record in document.load_records:
         if load_record.record_name == "BEUSLO" and len(load_record.raw_values) >= 9:
-            element_id = int(load_record.raw_values[4])
+            # BEUSLO ELNO is the internal element number; files without
+            # internal numbering use one namespace.
+            source_id = int(load_record.raw_values[4])
+            element_map = document.element_internal_to_external
+            element_id = element_map.get(source_id) if element_map else source_id
+            if element_id is None:
+                diagnostics.append(
+                    FemDiagnostic(
+                        "FEM105",
+                        f"BEUSLO references unknown internal element {source_id}",
+                        severity="error",
+                        context={"element_id": source_id},
+                    )
+                )
+                continue
             if element_id in shell_ids:
                 # Load values start at index 8; the mean over the element's
                 # result points is the equivalent uniform pressure.
@@ -453,9 +633,21 @@ def _install_loads(
                     if float(value) == float(value) and abs(float(value)) != float("inf")
                 ]
                 if values:
+                    pressure = sum(values) / len(values)
                     semantics.pressure_of_element[element_id] = semantics.pressure_of_element.get(
                         element_id, 0.0
-                    ) + sum(values) / len(values)
+                    ) + pressure
+                    case = semantics.pressure_by_case.setdefault(int(load_record.raw_values[0]), {})
+                    case[element_id] = case.get(element_id, 0.0) + pressure
+        elif load_record.record_name == "BNLOAD":
+            resolved = _nodal_load(document, semantics, load_record, transformed_nodes, diagnostics)
+            if resolved is None:
+                continue
+            case_id, node_id, forces = resolved
+            case_loads = semantics.nodal_loads_by_case.setdefault(case_id, {})
+            previous = case_loads.get(node_id, (0.0,) * len(forces))
+            case_loads[node_id] = tuple(a + b for a, b in zip(previous, forces))
+            found = True
         elif load_record.record_name == "BGRAV" and len(load_record.raw_values) >= 7:
             gx, gy, gz = (float(value) for value in load_record.raw_values[-3:])
             if abs(gx) > 0.0 or abs(gy) > 0.0 or abs(gz) > 0.0:
@@ -467,6 +659,11 @@ def _install_loads(
         for element_id, pressure in sorted(semantics.pressure_of_element.items())
         if pressure != 0.0
     }
+    semantics.pressure_by_case = {
+        case_id: {element_id: pressure for element_id, pressure in sorted(pressures.items()) if pressure != 0.0}
+        for case_id, pressures in sorted(semantics.pressure_by_case.items())
+    }
+    semantics.pressure_by_case = {case_id: pressures for case_id, pressures in semantics.pressure_by_case.items() if pressures}
     found = found or bool(semantics.pressure_of_element)
     if not found:
         diagnostics.append(
