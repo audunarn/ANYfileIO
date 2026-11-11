@@ -14,7 +14,7 @@ round-tripped without being understood, and understood without being solved.
 A record that this package cannot interpret is preserved rather than dropped,
 so a round trip does not quietly delete what it did not recognize.
 
-The package deliberately does not import ANYsolver.  It hands back a neutral
+The package deliberately does not import ANYfeSolver.  It hands back a neutral
 mesh and neutral records; turning those into solver elements is the solver's
 job, and keeping the arrow pointing that way is what allows the two to be
 released independently.
@@ -116,7 +116,7 @@ from .sesam import (
     write_sesam_fem_document,
 )
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 __all__ = [
     "BackendCompatibilityError",

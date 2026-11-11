@@ -5,20 +5,20 @@
 ```
 ANYmaterial ──┐
               ├──→ ANYfileio ──┐
-ANYmesher ────┘                ├──→ ANYsolver ──→ ANYfem
+ANYmesher ────┘                ├──→ ANYfeSolver ──→ ANYfem
                                │         └──────→ ANYstructure
                                └────────────────→ ANYstructure
 ```
 
-ANYfileio sits above ANYmesher and ANYmaterial and below ANYsolver. It hands back
+ANYfileio sits above ANYmesher and ANYmaterial and below ANYfeSolver. It hands back
 a neutral mesh and neutral material and section records; turning those into
-solver elements is ANYsolver's job. `tests/test_layering.py` enforces the
+solver elements is ANYfeSolver's job. `tests/test_layering.py` enforces the
 direction by walking the AST of every module, because the tempting import — pull
 in the solver to compare a parsed document against a built model — is exactly the
 one that would close the cycle.
 
 The consequence worth stating: `build_fe_model_from_sesam_document` stays in
-ANYsolver. This package can say "twelve Q4 shells with these nodes and this
+ANYfeSolver. This package can say "twelve Q4 shells with these nodes and this
 thickness"; it cannot say `ShellElement`.
 
 ## Three layers per format
@@ -69,7 +69,7 @@ here is supported and guarded; synthesis is not offered at all rather than
 offered with a caveat in the docstring.
 
 The same reasoning applies to generated CalculiX decks. A deck that has not been
-run is a reproducibility handoff, not evidence of agreement. ANYsolver labels
+run is a reproducibility handoff, not evidence of agreement. ANYfeSolver labels
 unexecuted decks `not_executed`; nothing here dresses them up as more.
 
 ## Units

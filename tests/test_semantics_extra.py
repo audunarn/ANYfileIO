@@ -19,7 +19,7 @@ from anyfileio.sesam.semantics import SesamSemantics, SesamSupport, read_sesam_s
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 SETUP_HINT = (
-    "semantic operations require separately installed compatible owners in ANYfileio 0.3.2; "
+    "semantic operations require separately installed compatible owners in ANYfileio 0.3.3; "
     "install ANYmesher>=0.2,<0.6 and ANYmaterial>=0.1,<0.3"
 )
 
