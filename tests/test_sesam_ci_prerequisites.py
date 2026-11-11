@@ -4,6 +4,8 @@ and per-case BNLOAD/BEUSLO loads.  No external jobs."""
 
 from __future__ import annotations
 
+from importlib.util import find_spec
+
 import pytest
 
 from anyfileio import read_sesam_fem_document
@@ -125,13 +127,27 @@ def test_beuslo_internal_element_maps_to_external(tmp_path):
 
 
 def test_unknown_beuslo_element_refuses_incomplete_load_case(tmp_path):
-    from anyfileio import read_sesam_semantics
+    from anyfileio import SemanticDependencyError, read_sesam_semantics
+
     specs = _structured_specs()
     index = next(i for i, (name, _) in enumerate(specs) if name == "BEUSLO")
     values = list(specs[index][1]); values[4] = 999
     specs[index] = ("BEUSLO", tuple(values))
+    path = _write(tmp_path / "bad-pressure.FEM", specs)
+    document = read_sesam_fem_document(path)
+    [pressure] = [load for load in document.load_records if load.record_name == "BEUSLO"]
+    assert pressure.raw_values == tuple(values)
+
+    missing = tuple(name for name in ("ANYmaterial", "ANYmesher") if find_spec(name.lower()) is None)
+    if missing:
+        with pytest.raises(SemanticDependencyError) as caught:
+            read_sesam_semantics(path, strict=True)
+        assert caught.value.code == "SEM001"
+        assert caught.value.diagnostics[0].context["missing_distributions"] == missing
+        return
+
     with pytest.raises(SesamFemError) as caught:
-        read_sesam_semantics(_write(tmp_path / "bad-pressure.FEM", specs), strict=True)
+        read_sesam_semantics(path, strict=True)
     assert any(d.code == "FEM105" and d.severity == "error"
                and d.context.get("element_id") == 999 for d in caught.value.diagnostics)
 
