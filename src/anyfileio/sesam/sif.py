@@ -11,6 +11,140 @@ from .records import read_raw_records
 from .schema import get_element_spec
 
 
+def _sif_integer(value: float, label: str) -> int:
+    if not math.isfinite(value) or value != int(value):
+        raise ValueError(f"SIF {label} must be a finite integer")
+    return int(value)
+
+
+def _reported_record_values(record, minimum: int) -> tuple[float, ...]:
+    values = record.numeric_fields
+    if len(values) < minimum or not all(math.isfinite(v) for v in values):
+        raise ValueError(f"malformed/nonfinite {record.name} descriptor")
+    if _sif_integer(values[0], f"{record.name} NFIELD") != len(values):
+        raise ValueError(f"{record.name} NFIELD does not match record length")
+    return values
+
+
+def _section_marker(record) -> bool:
+    values = record.numeric_fields
+    if values and values[0] < 0:
+        if len(values) != 4 or values[0] != -4 or any(not math.isfinite(v) or v != int(v) for v in values):
+            raise ValueError(f"malformed {record.name} section marker")
+        return True
+    return False
+
+
+def _reported_shell_stresses(records, document, load_case, internal_to_external):
+    """Read the bounded flat-shell reported-frame contract from DNV SIF2.
+
+    RDPOINTS/RDSTRESS definitions take precedence over input/geometry frames.
+    Only real nonlayered flat shells with three in-plane components and a global
+    or common result frame are supported here. Unsupported reported semantics
+    raise; they must never silently enter the legacy geometry fallback.
+    """
+    points = {}; components = {}; cases = {}; coordinate_refs={}
+    for record in records:
+        if record.name not in {"RDPOINTS", "RDSTRESS", "RDRESREF", "RDIELCOR"} or _section_marker(record):
+            continue
+        minimum = {"RDPOINTS":9,"RDSTRESS":3,"RDRESREF":7,"RDIELCOR":3}[record.name]
+        v = _reported_record_values(record, minimum)
+        if record.name == "RDPOINTS":
+            key = (_sif_integer(v[1],"IRPALT"), _sif_integer(v[2],"IIELNO"))
+            target = points
+        else:
+            key = _sif_integer(v[1],f"{record.name} reference")
+            target = components if record.name == "RDSTRESS" else coordinate_refs if record.name=='RDIELCOR' else cases
+        if key in target:
+            raise ValueError(f"duplicate {record.name} descriptor identity {key}")
+        target[key] = v
+    results = {}; provenance = {}
+    for record in records:
+        if record.name != "RVSTRESS" or _section_marker(record):
+            continue
+        v = _reported_record_values(record, 5)
+        case = _sif_integer(v[1],"result case")
+        if case != load_case:
+            continue
+        internal = _sif_integer(v[2],"result internal element")
+        alternative = _sif_integer(v[3],"result point alternative")
+        descriptor = _sif_integer(v[4],"stress component reference")
+        if (alternative,internal) not in points or descriptor not in components or case not in cases:
+            raise ValueError("RVSTRESS has unresolved RDPOINTS/RDSTRESS/RDRESREF reference")
+        p, c, case_values = points[(alternative,internal)], components[descriptor], cases[case]
+        _sif_integer(p[3],"ICOREF")
+        if _sif_integer(case_values[5],"COMPLEX") != 0:
+            raise ValueError("complex reported shell stress results are unsupported")
+        ntypes = _sif_integer(case_values[6],"NUMTYP")
+        if ntypes < 0 or len(case_values) != 7+3*ntypes:
+            raise ValueError("RDRESREF reference-type count mismatch")
+        count = _sif_integer(c[2],"NUMSTRCMP")
+        codes = tuple(_sif_integer(x,"ICOMP") for x in c[3:])
+        if count != 3 or len(codes) != count or set(codes) != {1,2,4}:
+            raise ValueError("only reported flat-shell SIGXX/SIGYY/TAUXY components are supported")
+        eid = internal_to_external.get(internal)
+        element = document.elements.get(eid)
+        if element is None or element.type_code not in {24,25}:
+            raise ValueError("reported stresses require resolved flat Q4/T3 shell identity")
+        if _sif_integer(p[4],"IELTYP") != element.type_code:
+            raise ValueError("RDPOINTS type disagrees with model element")
+        nrp, grid, nrptra, layers = (_sif_integer(p[i],label) for i,label in
+                                   ((5,"NRP"),(6,"IJKDIM"),(7,"NRPTRA"),(8,"NLAY")))
+        if nrp <= 0 or nrp > len(p) or layers != 0 or nrptra not in {0,1}:
+            raise ValueError("unsupported layered/per-point-frame or empty reported shell layout")
+        slots = nrp if grid <= 0 else (grid//10000)*((grid%10000)//100)*(grid%100)
+        if slots <= 0 or slots > len(p):
+            raise ValueError("invalid RDPOINTS grid dimensions/count")
+        offset = 9; point_ids=[];physical_points=[];natural_points=[]
+        coordinate_ref=coordinate_refs.get(int(p[3]))
+        if coordinate_refs and coordinate_ref is None:raise ValueError('unresolved RDIELCOR coordinate descriptor')
+        natural_grid=None
+        if coordinate_ref is not None:
+            if grid<=0 or coordinate_ref[2]!=0:raise ValueError('unsupported reported natural coordinate layout')
+            nk,nj,ni=grid//10000,(grid%10000)//100,grid%100
+            if len(coordinate_ref)!=3+nk+nj+ni:raise ValueError('RDIELCOR coordinate count mismatch')
+            gamma=coordinate_ref[3:3+nk];eta=coordinate_ref[3+nk:3+nk+nj];xi=coordinate_ref[3+nk+nj:]
+            natural_grid=[(x,y,z) for z in gamma for y in eta for x in xi]
+        for slot in range(slots):
+            if offset >= len(p):raise ValueError("truncated RDPOINTS point grid")
+            point_id = _sif_integer(p[offset],"IPOINT")
+            offset += 1
+            if point_id == -1 and grid > 0:
+                continue
+            if point_id <= 0 or offset+3 > len(p):
+                raise ValueError("invalid/truncated RDPOINTS point coordinates")
+            point_ids.append(point_id);physical_points.append(tuple(p[offset:offset+3]));offset += 3
+            if natural_grid is not None:natural_points.append(natural_grid[slot])
+        if (point_ids if grid>0 else sorted(point_ids)) != list(range(1,nrp+1)):
+            raise ValueError("RDPOINTS point IDs/count are not sequential and complete")
+        if len(p)-offset != 9*nrptra:
+            raise ValueError("RDPOINTS transformation count/length mismatch")
+        rotation = np.eye(3) if nrptra == 0 else np.asarray(p[offset:]).reshape(3,3,order="F")
+        if not np.allclose(rotation.T@rotation,np.eye(3),rtol=0,atol=1e-6) or not np.isclose(np.linalg.det(rotation),1.,rtol=0,atol=1e-6):
+            raise ValueError("RDPOINTS frame must be orthonormal and right handed")
+        if len(v) != 5+nrp*count:
+            raise ValueError("RVSTRESS point/component count mismatch")
+        if eid in results:raise ValueError("duplicate selected reported stress element")
+        samples = np.asarray(v[5:]).reshape(nrp,count)
+        sx, sy, xy = (samples[:,codes.index(code)] for code in (1,2,4))
+        tensors = np.zeros((nrp,3,3))
+        tensors[:,0,0]=sx; tensors[:,1,1]=sy
+        tensors[:,0,1]=xy; tensors[:,1,0]=xy
+        mean = np.mean(rotation@tensors@rotation.T,axis=0)
+        results[eid] = (float(mean[0,0]),float(mean[1,1]),float(mean[2,2]),
+                        float(mean[0,1]),float(mean[1,2]),float(mean[2,0]))
+        provenance[eid] = {"result_case":case,"internal_element":internal,"point_alternative":alternative,
+                           "external_result_case":_sif_integer(case_values[3],"IERES"),
+                           "stress_descriptor":descriptor,"components":codes,"points":nrp,
+                           "frame":"GLOBAL" if nrptra==0 else "reported_common_local_to_global",
+                           "rotation":rotation.tolist(),"physical_point_coordinates":physical_points,
+                           "natural_point_coordinates":natural_points if natural_grid is not None else None,
+                           "coordinate_descriptor":int(p[3])}
+    if not results:
+        raise ValueError("no complete reported shell stress result for selected case")
+    return results, provenance
+
+
 @dataclass(frozen=True)
 class SesamStressResult:
     path: str
@@ -20,6 +154,7 @@ class SesamStressResult:
     nodal_stress: dict[int, tuple[float, ...]]
     element_stress: dict[int, tuple[float, ...]]
     units: str = "Pa"
+    frame_provenance: dict[int, dict[str, Any]] | None = None
 
 
 def _mean_rvstress_membrane_components(
@@ -270,7 +405,13 @@ def read_sesam_sif_stress(
     path: str | os.PathLike[str],
     load_case: int | None = None,
 ) -> SesamStressResult:
-    """Read RVSTRESS shell results as FRD-like global stress tensors."""
+    """Read RVSTRESS shell results as global stress tensors.
+
+    Reported RDPOINTS/RDSTRESS frames are authoritative when present. Their
+    bounded real, nonlayered flat-shell global/common-frame layouts are checked
+    strictly; malformed/unsupported reported layouts raise ValueError. Files
+    without reported descriptors retain the legacy input/geometry frame route.
+    """
 
     path_text = str(path)
     # Lenient, because a result file is read to find out what is in it; a
@@ -282,12 +423,18 @@ def read_sesam_sif_stress(
     element_stress: dict[int, tuple[float, ...]] = {}
 
     raw_records = read_raw_records(Path(path_text), strict=False)
+    reported = any(record.name in {"RDPOINTS","RDSTRESS"} for record in raw_records)
     internal_to_external: dict[int, int] = {}
     for record in raw_records:
         if record.name != "GELMNT1" or len(record.numeric_fields) < 2:
             continue
         external_id = int(round(record.numeric_fields[0]))
         internal_id = int(round(record.numeric_fields[1]))
+        if reported:
+            external_id = _sif_integer(record.numeric_fields[0],"model external element")
+            internal_id = _sif_integer(record.numeric_fields[1],"model internal element")
+            if internal_id in internal_to_external:
+                raise ValueError("duplicate/ambiguous reported model internal element ID")
         internal_to_external[internal_id] = external_id
 
     if load_case is None:
@@ -300,7 +447,14 @@ def read_sesam_sif_stress(
                 load_case = int(round(record.numeric_fields[1]))
                 break
 
+    frame_provenance = None
+    if reported:
+        element_stress, frame_provenance = _reported_shell_stresses(
+            raw_records,document,load_case,internal_to_external)
+
     for record in raw_records:
+        if reported:
+            break
         if record.name != "RVSTRESS" or not record.numeric_fields or len(record.numeric_fields) < 8:
             continue
         values = record.numeric_fields
@@ -334,6 +488,12 @@ def read_sesam_sif_stress(
             nodal_sums[node_id] += vector
             nodal_counts[node_id] += 1
 
+    if reported:
+        for element_id,vector in element_stress.items():
+            for node_id in document.elements[element_id].node_ids:
+                nodal_sums[node_id] += np.asarray(vector)
+                nodal_counts[node_id] += 1
+
     nodal_stress = {
         node_id: tuple((values / max(nodal_counts[node_id], 1)).tolist())
         for node_id, values in nodal_sums.items()
@@ -354,6 +514,7 @@ def read_sesam_sif_stress(
         components=("SXX", "SYY", "SZZ", "SXY", "SYZ", "SZX"),
         nodal_stress=nodal_stress,
         element_stress=element_stress,
+        frame_provenance=frame_provenance,
     )
 
 
