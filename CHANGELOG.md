@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 - 2026-11-11
+
+- Read SESTRA shell stresses using the reported component order and rotation
+  frame, including relabelled RDSTRESS descriptors and RDPOINTS alternatives.
+- Resolve SESAM beam offsets, material slots and element loads through the
+  semantic reader. The base wheel continues to require only NumPy.
+
 ## 0.3.2 - 2026-09-16
 
 Fixed:

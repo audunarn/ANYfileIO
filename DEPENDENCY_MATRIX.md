@@ -65,6 +65,7 @@ complete.
 
 | Distribution / extra | Target | Frozen requirements | Status |
 | --- | --- | --- | --- |
+| `ANYfileio` | `0.3.3` | `numpy>=1.26` | SESTRA reader maintenance release candidate; publication requires validated Trusted Publishing workflow |
 | `ANYfileio` | `0.3.2` | `numpy>=1.26` | MPL-2.0 compatibility release candidate; publication requires validated Trusted Publishing workflow |
 | Semantic runtime | not a 0.3.2 extra | `ANYgeometry[planar]==0.4.3`; `ANYmesher==0.5.0`; `ANYmaterial==0.2.0` | Published-wheel semantic qualification on Windows/Linux, Python 3.11-3.14 |
 

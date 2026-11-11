@@ -6,7 +6,7 @@ FEM (`.fem`) and SIF (`.sif`), CalculiX input decks (`.inp`) and results (`.frd`
 
 Install the NumPy-only base with `python -m pip install ANYfileio`. It provides
 records, documents, built-in formats, the inspector and CLI, plus CAD-neutral
-records, backend discovery, and preview artifacts. Version 0.3.2 does not bundle
+records, backend discovery, and preview artifacts. Version 0.3.3 does not bundle
 the semantic mesh/material owners or a native CAD provider. Optional semantic
 operations accept separately installed `ANYmesher>=0.2,<0.6` and
 `ANYmaterial>=0.1,<0.3`, and fail with typed, truthful diagnostics when those
@@ -141,7 +141,7 @@ The currently qualified published semantic stack is installed explicitly:
 
 ```powershell
 python -m pip install "ANYgeometry[planar]==0.4.3" "ANYmesher==0.5.0" "ANYmaterial==0.2.0"
-python -m pip install "ANYfileio[dev]==0.3.2"
+python -m pip install "ANYfileio[dev]==0.3.3"
 ```
 
 Editable owner checkouts remain supported for coordinated development:
@@ -154,7 +154,7 @@ python -m pip install -e "C:\Github\ANYfileIO[dev]"
 python -m pytest
 ```
 
-The 0.3.2 PyPI distribution remains the NumPy-only base and publishes no
+The 0.3.3 PyPI distribution remains the NumPy-only base and publishes no
 `semantics` extra. The published versions above are qualified together on
 Windows and Linux for Python 3.11 through 3.14, while imports remain lazy and
 provider-free until a semantic operation executes. Native OCCT-backed CAD
