@@ -123,7 +123,7 @@ nothing about agreement.
 
 The optional semantic layer of ANYfileio sits above
 [ANYmesher](https://github.com/audunarn/ANYmesh) and
-[ANYmaterial](https://github.com/audunarn/ANYmaterial) and below ANYsolver. The
+[ANYmaterial](https://github.com/audunarn/ANYmaterial) and below ANYfeSolver. The
 NumPy-only base does not import either semantic package. Semantics hands back a
 neutral mesh and neutral records; turning those into solver elements is the
 solver's job. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the layering

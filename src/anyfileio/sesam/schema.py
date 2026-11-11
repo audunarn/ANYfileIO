@@ -1,7 +1,7 @@
 """SESAM formatted FEM schema registry used by the importer/exporter.
 
 The registry is intentionally small and explicit.  It covers the record and
-element families that ANYsolver can preserve today, while keeping unknown
+element families that ANYfeSolver can preserve today, while keeping unknown
 records available for later, higher-fidelity gates.
 """
 
