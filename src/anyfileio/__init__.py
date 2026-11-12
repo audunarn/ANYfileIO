@@ -204,3 +204,8 @@ __all__ = [
     "write_preview_artifact",
     "write_sesam_fem_document",
 ]
+
+from .orcawave import OrcaWavePressureDocument, OrcaWavePressureError, OrcaWavePressureCancelled, read_orcawave_pressure
+__all__ += ['OrcaWavePressureDocument', 'OrcaWavePressureError', 'OrcaWavePressureCancelled', 'read_orcawave_pressure']
+from .orcawave import OrcaWaveMissingOutputError, OrcaWaveUnsupportedFormatError, OrcaWaveInvalidDataError
+__all__ += ['OrcaWaveMissingOutputError', 'OrcaWaveUnsupportedFormatError', 'OrcaWaveInvalidDataError']
