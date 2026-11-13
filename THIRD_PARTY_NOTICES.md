@@ -1,6 +1,6 @@
 # Third-party notices
 
-ANYfileio 0.3.3 has one direct runtime dependency:
+ANYfileio 0.3.4 has one direct runtime dependency:
 
 | Dependency | Declared version | Upstream | License | Bundled |
 | --- | --- | --- | --- | --- |
@@ -20,4 +20,4 @@ projects.
 
 The optional semantic owners (ANYgeometry, ANYmesher, and
 ANYmaterial) and the deferred native provider (ANYfileio-occt / OCP) are not
-runtime dependencies and are not bundled in ANYfileio 0.3.3.
+runtime dependencies and are not bundled in ANYfileio 0.3.4.

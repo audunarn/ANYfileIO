@@ -134,7 +134,7 @@ def test_runtime_dependency_license_inventory_is_complete_and_permissive() -> No
     inventory = json.loads(_repository_text("dependency-licenses.json"))
     assert inventory == {
         "schema_version": 1,
-        "release": "ANYfileio 0.3.3",
+        "release": "ANYfileio 0.3.4",
         "observed_on": "2026-09-16",
         "dependencies": [
             {
@@ -280,7 +280,7 @@ def test_dependency_matrix_records_published_semantic_qualification() -> None:
     matrix = _repository_text("DEPENDENCY_MATRIX.md")
     assert "5513881827cdee9fd337497a2730a5912d8ea751" in matrix
     assert "1f0b5780df7f025fc786fd3db2cba9da2104fb5c" in matrix
-    assert "`ANYfileio` | `0.3.3` | `numpy>=1.26`" in matrix
+    assert "`ANYfileio` | `0.3.4` | `numpy>=1.26`" in matrix
     for requirement in (
         "ANYgeometry[planar]==0.4.3",
         "ANYmesher==0.5.0",
@@ -307,7 +307,7 @@ def test_release_workflow_uses_manual_trusted_publishing() -> None:
     assert "test.pypi.org" not in workflow
     assert "refs/heads/main" in workflow
     assert "expected release version {version}" in workflow
-    assert 'version = "0.3.3"' in workflow
+    assert 'version = "0.3.4"' in workflow
     assert "anyfileio-{version}-py3-none-any.whl" in workflow
     assert "anyfileio-{version}.tar.gz" in workflow
     assert "unexpected runtime requirements" in workflow
@@ -326,7 +326,7 @@ def test_public_release_claims_are_numpy_only() -> None:
     changelog = _repository_text("CHANGELOG.md")
     assert "ANYfileio[semantics]" not in readme
     assert "ANYfileio[semantics]" not in changelog
-    assert "## 0.3.3 - 2026-11-11" in changelog
+    assert "## 0.3.4 - 2026-11-13" in changelog
     assert "does not bundle\nthe semantic mesh/material owners" in readme
     assert "no native OCCT provider" in changelog
     assert "Mozilla Public License 2.0" in readme
