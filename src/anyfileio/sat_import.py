@@ -65,7 +65,7 @@ def _builtin(index, scale, cancelled=None):
         try:
             if entity.kind == 'body' and entity.body.split()[6] != '$-1':
                 raise ValueError('body transform requires an unavailable exact converter')
-            if entity.kind == 'vertex':
+            if entity.kind in ('vertex', 'tvertex-vertex'):
                 vertices[str(number)] = [c * scale for c in index._point(number)]
             if entity.kind == 'edge':
                 edge = index.edge(number)
@@ -136,13 +136,42 @@ def _adapter(data, python, loader, timeout, cancelled=None):
             raise SatImportError('Local SAT adapter failed', diagnostics)
         return json.loads(destination.read_text(encoding='utf-8'))
 
-def read_sat(path: str | Path, *, freecad_python=None, inventor_loader=None, timeout=60, cancelled=None) -> SatImportResult:
+MAX_VERTEX_RELOCATION_M = 1e-4
+
+
+MAX_APPROXIMATE_CURVE_TOLERANCE_M = 1e-4
+
+
+def read_sat(path: str | Path, *, freecad_python=None, inventor_loader=None, timeout=60, cancelled=None, vertex_relocation_tolerance_m=None, approximate_curve_tolerance_m=None) -> SatImportResult:
     """Read all indexed SAT faces and loose edges, or refuse the entire import.
 
     Coordinates are converted to metres. Optional FreeCAD/InventorLoader paths
     activate an isolated local adapter. The source is snapshotted and never edited.
     One source edge may map to several exact native edges at piece boundaries.
+
+    ``vertex_relocation_tolerance_m`` is an explicit caller opt-in, recorded in
+    face metadata. A source vertex whose point lies beyond the source resolution
+    from its edges' curve ends is moved onto those ends, but only when all of them
+    agree within the source resolution and the move is no larger than this value.
+    Every tolerance of the built model stays the source resolution. The default
+    ``None`` never moves a vertex.
+
+    Procedural intcurves are represented by their stored cache, which the source
+    declares accurate to a fit tolerance. A cache declared within the source
+    resolution is admitted. ``approximate_curve_tolerance_m`` is an explicit caller
+    opt-in, recorded in face metadata, that admits caches declared up to that value;
+    the default ``None`` refuses looser caches.
     """
+    if approximate_curve_tolerance_m is not None:
+        value = approximate_curve_tolerance_m
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= MAX_APPROXIMATE_CURVE_TOLERANCE_M:
+            raise ValueError(f'approximate_curve_tolerance_m must be finite and in (0, {MAX_APPROXIMATE_CURVE_TOLERANCE_M}] metres')
+        approximate_curve_tolerance_m = float(value)
+    if vertex_relocation_tolerance_m is not None:
+        value = vertex_relocation_tolerance_m
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= MAX_VERTEX_RELOCATION_M:
+            raise ValueError(f'vertex_relocation_tolerance_m must be finite and in (0, {MAX_VERTEX_RELOCATION_M}] metres')
+        vertex_relocation_tolerance_m = float(value)
     if cancelled is not None and not callable(cancelled):
         raise TypeError('cancelled must be a callback or None')
     _check_cancelled(cancelled)
@@ -171,13 +200,13 @@ def read_sat(path: str | Path, *, freecad_python=None, inventor_loader=None, tim
     if geometry_data['errors']:
         raise SatImportError('SAT contains unsupported geometry', geometry_data['errors'])
     try:
-        return _materialize(index, geometry_data, digest, scale, float(data.splitlines()[2].split()[1]) * scale, cancelled)
+        return _materialize(index, geometry_data, digest, scale, float(data.splitlines()[2].split()[1]) * scale, cancelled, vertex_relocation_tolerance_m, approximate_curve_tolerance_m)
     except SatImportError:
         raise
     except Exception as error:
         raise SatImportError('SAT geometry cannot satisfy native topology contracts', (str(error),)) from error
 
-def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None):
+def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None, relocation_tolerance=None, approximate_tolerance=None):
     import numpy as np
     from anygeometry import GeometryModel, OrientedEdge
     from anygeometry.nurbs import NurbsCurve
@@ -192,9 +221,26 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None)
     faces = {}
     max_gap = 0.0
     max_surface_gap = 0.0
-    for source, point in payload['vertices'].items():
-        _check_cancelled(cancelled)
-        vertices[int(source)] = model.add_point(*point)
+    # ACIS tolerant vertices declare how far their edges' ends may lie from the vertex;
+    # the declaration is recorded, not used to widen admission.
+    vertex_tolerance = {}
+    for number, entity in index.entities.items():
+        if entity.kind != 'tvertex-vertex':
+            continue
+        tokens = entity.body.split()
+        try:
+            value = float(tokens[6]) * scale
+        except (IndexError, ValueError):
+            value = math.nan
+        if not math.isfinite(value) or value <= 0:
+            raise SatImportError(f'vertex {number}: invalid tolerant-vertex tolerance')
+        vertex_tolerance[number] = value
+    max_tolerant_gap = 0.0
+    # Prepare every edge's exact pieces before vertices are placed.
+    prepared_edges = {}
+    incident = {}
+    max_declared_fit = 0.0
+    fit_allowance = max(source_accuracy, approximate_tolerance or 0.0)
     for number, entity in index.entities.items():
         _check_cancelled(cancelled)
         if entity.kind != 'edge':
@@ -203,13 +249,19 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None)
         if not parts:
             raise SatImportError(f'edge {number}: no exact curve definition')
         tokens = entity.body.split()
-        start = vertices[int(tokens[4][1:])]
-        end = vertices[int(tokens[6][1:])]
+        start_number, end_number = (int(tokens[4][1:]), int(tokens[6][1:]))
         prepared = []
         for part in parts:
             if part['kind'] == 'line':
                 prepared.append((None, part['start'], part['end']))
             elif part['kind'] == 'nurbs':
+                fit = float(part.get('declared_fit_tolerance_m', 0.0))
+                if not math.isfinite(fit) or fit < 0:
+                    raise SatImportError(f'edge {number}: invalid declared cache fit tolerance')
+                if fit > fit_allowance:
+                    hint = '' if approximate_tolerance else '; approximate_curve_tolerance_m opts in'
+                    raise SatImportError(f'edge {number}: approximate curve cache declared to {fit} m exceeds {"the caller opt-in" if approximate_tolerance else "the source resolution"} {fit_allowance}{hint}')
+                max_declared_fit = max(max_declared_fit, fit)
                 curve = NurbsCurve(part['degree'], tuple(part['knots']), tuple(map(tuple, part['controls'])), tuple(part['weights']), tuple(part['domain']))
                 prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
             elif part['kind'] == 'ellipse':
@@ -220,17 +272,55 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None)
                     prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
             else:
                 raise SatImportError(f'edge {number}: unknown adapter curve kind')
+        prepared_edges[number] = (start_number, end_number, prepared)
+        incident.setdefault(start_number, []).append(np.asarray(prepared[0][1], dtype=float))
+        incident.setdefault(end_number, []).append(np.asarray(prepared[-1][2], dtype=float))
+    # Opt-in only: move a vertex onto its edges' agreeing curve ends; tolerances are unchanged.
+    relocated = {}
+    if relocation_tolerance is not None:
+        for vertex, points in incident.items():
+            position = payload['vertices'].get(str(vertex))
+            if position is None:
+                continue
+            position = np.asarray(position, dtype=float)
+            if max(float(np.linalg.norm(q - position)) for q in points) <= source_accuracy:
+                continue
+            if max(float(np.linalg.norm(a - b)) for a in points for b in points) > source_accuracy:
+                continue
+            target = np.mean(points, axis=0)
+            distance = float(np.linalg.norm(target - position))
+            if distance <= relocation_tolerance:
+                relocated[vertex] = (tuple(float(c) for c in target), distance)
+    for source, point in payload['vertices'].items():
+        _check_cancelled(cancelled)
+        moved = relocated.get(int(source))
+        vertices[int(source)] = model.add_point(*(moved[0] if moved else point))
+    for number, (start_number, end_number, prepared) in prepared_edges.items():
+        _check_cancelled(cancelled)
+        start = vertices[start_number]
+        end = vertices[end_number]
         made = []
         previous = start
         for i, (curve, a, b) in enumerate(prepared):
             _check_cancelled(cancelled)
-            following = end if i == len(prepared) - 1 else model.add_point(*b)
-            gap = max(float(np.linalg.norm(model.vertex_position(previous) - a)), float(np.linalg.norm(model.vertex_position(following) - b)))
-            max_gap = max(max_gap, gap)
+            last = i == len(prepared) - 1
+            following = end if last else model.add_point(*b)
+            ends = []
+            for source_vertex, native, point in ((start_number if i == 0 else None, previous, a), (end_number if last else None, following, b)):
+                distance = float(np.linalg.norm(model.vertex_position(native) - point))
+                max_gap = max(max_gap, distance)
+                if source_vertex in vertex_tolerance:
+                    max_tolerant_gap = max(max_tolerant_gap, distance)
+                    ends.append((distance, f'source resolution at tolerant vertex {source_vertex} (declared {vertex_tolerance[source_vertex]!r} m)'))
+                elif source_vertex is not None:
+                    ends.append((distance, f'source resolution at vertex {source_vertex}'))
+                else:
+                    ends.append((distance, 'source resolution'))
+            gap, limit = max(ends, key=lambda item: item[0])
             if gap > source_accuracy:
-                raise SatImportError(f'edge {number}: endpoint gap {gap} exceeds source resolution {source_accuracy}')
+                raise SatImportError(f'edge {number}: endpoint gap {gap} exceeds {limit} {source_accuracy}')
             if curve is None:
-                if max(np.linalg.norm(model.vertex_position(previous) - a), np.linalg.norm(model.vertex_position(following) - b)) > source_accuracy:
+                if any(distance > source_accuracy for distance, _ in ends):
                     raise SatImportError(f'edge {number}: straight piece endpoints disagree with topology')
                 exact_endpoints = np.array_equal(model.vertex_position(previous), a) and np.array_equal(model.vertex_position(following), b)
                 try:
@@ -285,14 +375,36 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None)
         max_surface_gap = max(max_surface_gap, residual)
         if residual > source_accuracy:
             raise SatImportError(f'face {number}: sampled support residual {residual} exceeds source resolution {source_accuracy}')
+        for vertex in {v for e, _ in face.loops[0] for v in prepared_edges[e][:2]}:
+            if vertex in relocated:
+                position = model.vertex_position(vertices[vertex])
+                off = float(np.linalg.norm(surface.evaluate(*surface.local_uv(position)) - position))
+                if off > source_accuracy:
+                    raise SatImportError(f'face {number}: relocated vertex {vertex} lies {off} from the face surface, beyond source resolution {source_accuracy}')
         try:
             identifier = model.add_face_from_loop(loop, surface=surface)
         except Exception as error:
             raise SatImportError(f'face {number}: {error}') from error
-        model.set_face_metadata(identifier, dict(source_format='sat', source_sha256=digest, source_acis_face=number, source_unit_scale_m=scale, source_face_sense=entity.body.split()[9], source_absolute_resolution_m=source_accuracy, source_max_curve_endpoint_gap_m=max_gap, source_sampled_support_residual_m=residual, source_numerical_zero_intervals=payload.get('numerical_zero_intervals', {})))
+        metadata = dict(source_format='sat', source_sha256=digest, source_acis_face=number, source_unit_scale_m=scale, source_face_sense=entity.body.split()[9], source_absolute_resolution_m=source_accuracy, source_max_curve_endpoint_gap_m=max_gap, source_sampled_support_residual_m=residual, source_numerical_zero_intervals=payload.get('numerical_zero_intervals', {}))
+        if approximate_tolerance is not None or max_declared_fit > 0:
+            metadata.update(source_max_declared_curve_fit_m=max_declared_fit)
+            if approximate_tolerance is not None:
+                metadata.update(source_approximate_curve_opt_in_m=approximate_tolerance)
+        if relocation_tolerance is not None:
+            metadata.update(source_vertex_relocation_opt_in_m=relocation_tolerance, source_vertex_relocations_m={str(k): v[1] for k, v in sorted(relocated.items())})
+        if vertex_tolerance:
+            metadata.update(source_tolerant_vertices_m={str(k): v for k, v in sorted(vertex_tolerance.items())}, source_max_tolerant_vertex_gap_m=max_tolerant_gap)
+        model.set_face_metadata(identifier, metadata)
         faces[number] = identifier
     errors = model.validate_topology()
     _check_cancelled(cancelled)
     if errors:
         raise SatImportError('Imported SAT topology is invalid', tuple(map(str, errors)))
-    return SatImportResult(model, digest, scale, ('Geometry only: structural properties are unassigned.', f'Source absolute resolution {source_accuracy:.17g} m; maximum curve endpoint gap {max_gap:.17g} m; maximum sampled support residual {max_surface_gap:.17g} m.', f"Numerical zero leaf report: {payload.get('numerical_zero_intervals', {})}"), vertices, edges, faces)
+    notes = ('Geometry only: structural properties are unassigned.', f'Source absolute resolution {source_accuracy:.17g} m; maximum curve endpoint gap {max_gap:.17g} m; maximum sampled support residual {max_surface_gap:.17g} m.', f"Numerical zero leaf report: {payload.get('numerical_zero_intervals', {})}")
+    if approximate_tolerance is not None or max_declared_fit > 0:
+        notes += (f'Approximate curve caches: largest declared fit tolerance {max_declared_fit:.17g} m' + (f' (caller opt-in {approximate_tolerance:.17g} m).' if approximate_tolerance is not None else '.'),)
+    if relocation_tolerance is not None:
+        notes += (f'Vertex relocation opt-in {relocation_tolerance:.17g} m: {len(relocated)} vertices moved onto agreeing edge ends; largest move {max((v[1] for v in relocated.values()), default=0.0):.17g} m.',)
+    if vertex_tolerance:
+        notes += (f'Tolerant source vertices {len(vertex_tolerance)}; largest declared tolerance {max(vertex_tolerance.values()):.17g} m; maximum endpoint gap at tolerant vertices {max_tolerant_gap:.17g} m.',)
+    return SatImportResult(model, digest, scale, notes, vertices, edges, faces)
