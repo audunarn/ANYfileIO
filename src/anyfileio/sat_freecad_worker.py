@@ -154,9 +154,9 @@ def _leaf_fit_tolerance(subtype, fit_tolerance):
 
 def run(source, destination, loader):
     sys.path.insert(0, loader)
-    import FreeCAD
-    import Part
-    import Acis
+    # FreeCAD and InventorLoader exist only in the isolated local FreeCAD interpreter.
+    from importlib import import_module
+    FreeCAD, Part, Acis = (import_module('FreeCAD'), import_module('Part'), import_module('Acis'))
     original_set_bulk = Acis.Transform.setBulk
 
     def set_source_transform(transform, chunks, index):

@@ -533,3 +533,14 @@ def test_approximate_cache_within_resolution_admitted_and_reported():
 def test_approximate_curve_opt_in_validated(tmp_path, value):
     with pytest.raises(ValueError):
         read_sat(tmp_path / 'unused.sat', approximate_curve_tolerance_m=value)
+
+
+def test_vertex_gap_refusal_names_the_relocation_opt_in(tmp_path):
+    pytest.importorskip('anygeometry')
+    path = tmp_path / 'gap.sat'
+    path.write_bytes(_gapped_rectangle(1.5e-6))
+    with pytest.raises(SatImportError, match='vertex_relocation_tolerance_m opts in'):
+        read_sat(path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    with pytest.raises(SatImportError) as caught:
+        read_sat(path.with_name('gap.sat'), vertex_relocation_tolerance_m=1e-6)
+    assert 'opts in' not in str(caught.value)

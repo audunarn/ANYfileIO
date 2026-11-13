@@ -208,11 +208,18 @@ def read_sat(path: str | Path, *, freecad_python=None, inventor_loader=None, tim
 
 def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None, relocation_tolerance=None, approximate_tolerance=None):
     import numpy as np
-    from anygeometry import GeometryModel, OrientedEdge
-    from anygeometry.nurbs import NurbsCurve
-    from anygeometry.exact_curves import EllipticArc
-    from anygeometry.surfaces import Plane, Cylinder
-    from anygeometry.tolerance import TolerancePolicy
+    # ANYgeometry is an optional runtime provider for native SAT geometry (like OrcFxAPI for OrcaWave).
+    from importlib import import_module
+    try:
+        geometry = import_module('anygeometry')
+        NurbsCurve = import_module('anygeometry.nurbs').NurbsCurve
+        EllipticArc = import_module('anygeometry.exact_curves').EllipticArc
+        surfaces = import_module('anygeometry.surfaces')
+        TolerancePolicy = import_module('anygeometry.tolerance').TolerancePolicy
+    except ImportError as error:
+        raise SatImportError('SAT geometry import needs the ANYgeometry package', (str(error),)) from error
+    GeometryModel, OrientedEdge = (geometry.GeometryModel, geometry.OrientedEdge)
+    Plane, Cylinder = (surfaces.Plane, surfaces.Cylinder)
     if not math.isfinite(source_accuracy) or source_accuracy <= 0:
         raise SatImportError('Invalid SAT absolute resolution')
     model = GeometryModel(tolerance=TolerancePolicy(curve_fit_residual=source_accuracy, surface_residual=source_accuracy))
@@ -318,7 +325,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     ends.append((distance, 'source resolution'))
             gap, limit = max(ends, key=lambda item: item[0])
             if gap > source_accuracy:
-                raise SatImportError(f'edge {number}: endpoint gap {gap} exceeds {limit} {source_accuracy}')
+                hint = '; vertex_relocation_tolerance_m opts in' if relocation_tolerance is None and 'vertex' in limit else ''
+                raise SatImportError(f'edge {number}: endpoint gap {gap} exceeds {limit} {source_accuracy}{hint}')
             if curve is None:
                 if any(distance > source_accuracy for distance, _ in ends):
                     raise SatImportError(f'edge {number}: straight piece endpoints disagree with topology')
