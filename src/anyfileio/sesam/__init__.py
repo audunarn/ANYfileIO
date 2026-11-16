@@ -32,7 +32,12 @@ from .document import (
     parse_sesam_fem_records,
     read_sesam_fem_document,
 )
-from .exporter import SesamFemExportReport, export_sesam_fem, write_sesam_fem_document
+from .exporter import (
+    SesamFemExportReport,
+    export_sesam_fem,
+    sesam_document_from_semantics,
+    write_sesam_fem_document,
+)
 from .records import FemRawRecord, read_raw_records, records_to_text, strict_int
 from .schema import SESAM_ELEMENT_REGISTRY, SesamElementSpec, classify_record, get_element_spec
 from .semantics import (
@@ -83,6 +88,7 @@ __all__ = [
     "read_sesam_sif_stress",
     "read_sesam_sif_summary",
     "records_to_text",
+    "sesam_document_from_semantics",
     "shell_local_axes",
     "shell_thickness",
     "strict_int",

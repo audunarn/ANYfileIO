@@ -603,8 +603,17 @@ def _install_loads(
 
     shell_ids = set(semantics.mesh.quads) | set(semantics.mesh.tris)
     # BNLOAD components are only global when no node carries a transformation.
-    transformed_nodes = any(record.name in {"BNDOF", "BNTRCOS"} for record in document.raw_records) or any(
-        node.coordinate_system_id for node in document.nodes.values()
+    # BNTRCOS transforms referenced only by elements define element frames, not nodal frames.
+    element_transform_ids = {
+        tid
+        for ref in document.element_references.values()
+        for tid in (((ref.transform_id,) if ref.transform_id is not None else ()) + ref.nodal_transform_ids)
+    }
+    unreferenced_bntrcos = set(document.coordinate_transforms) - element_transform_ids
+    transformed_nodes = (
+        any(record.name == "BNDOF" for record in document.raw_records)
+        or bool(unreferenced_bntrcos)
+        or any(node.coordinate_system_id for node in document.nodes.values())
     )
     found = False
     for load_record in document.load_records:

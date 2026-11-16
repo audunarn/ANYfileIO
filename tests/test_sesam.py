@@ -399,3 +399,223 @@ def test_reader_classifies_named_hp_bulb_sections_as_l_bulb() -> None:
 
     assert document.sections[10].section_type == "L-bulb"
     assert document.sections[10].web_height == pytest.approx(0.160)
+
+
+def test_semantic_sesam_export_and_roundtrip(tmp_path: Path) -> None:
+    anymesher = pytest.importorskip("anymesher")
+    anymaterial = pytest.importorskip("anymaterial")
+    import numpy as np
+    from anyfileio import (
+        SesamSemantics,
+        SesamSupport,
+        sesam_document_from_semantics,
+    )
+    from anyfileio.sesam.document import SesamFemDocument
+
+    mesh = anymesher.Mesh(
+        nodes={
+            11: np.array([0.0, 0.0, 0.0]),
+            12: np.array([2.0, 0.0, 0.0]),
+            13: np.array([2.0, 1.0, 0.0]),
+            14: np.array([0.0, 1.0, 0.0]),
+            15: np.array([0.0, 0.0, 2.0]),
+            16: np.array([2.0, 0.0, 2.0]),
+        },
+        quads={101: (11, 12, 13, 14)},
+        tris={102: (11, 12, 15)},
+        beams={
+            201: (11, 12),
+            202: (12, 16),
+            203: (15, 16),
+            204: (11, 15),
+            205: (13, 14),
+        },
+    )
+    dummy_doc = SesamFemDocument(
+        source_path=None,
+        header=read_sesam_fem_document(_work_dir() / "mixed_shells.FEM").header
+        if (_work_dir() / "mixed_shells.FEM").exists()
+        else sesam_document_from_semantics(
+            type("M", (), {
+                "mesh": anymesher.Mesh(nodes={1: np.zeros(3), 2: np.ones(3)}, beams={1: (1, 2)}),
+            })()
+        ).header,
+        raw_records=(),
+        record_counts={},
+        materials={},
+        sections={},
+        concepts=(),
+        coordinate_systems={},
+        unit_vectors={},
+        coordinate_transforms={},
+        nodes={},
+        elements={},
+        element_references={},
+        boundaries=(),
+        dependencies=(),
+        load_records=(),
+        unknown_records=(),
+    )
+    mat_steel = anymaterial.MaterialSpec(
+        name="AH36 steel",
+        symmetry="isotropic",
+        constants={"elastic_modulus": 2.1e11, "poisson_ratio": 0.3},
+        density=7850.0,
+        yield_stress=355.0e6,
+    )
+    mat_zero_nu = anymaterial.MaterialSpec(
+        name="Cork 10",
+        symmetry="isotropic",
+        constants={"elastic_modulus": 5.0e9, "poisson_ratio": 0.0},
+        density=1200.0,
+    )
+    semantics = SesamSemantics(
+        document=dummy_doc,
+        mesh=mesh,
+        materials={1: mat_steel, 2: mat_zero_nu},
+        material_of_element={101: 1, 102: 2, 201: 1, 202: 1, 203: 1, 204: 2, 205: 1},
+        thickness_of_element={101: 0.025, 102: 0.012},
+        local_axes_of_element={
+            101: {"x": (0.0, 1.0, 0.0), "y": (-1.0, 0.0, 0.0), "z": (0.0, 0.0, 1.0)},
+        },
+        section_of_element={
+            201: {
+                "name": "HPbulb200",
+                "section_type": "L-bulb",
+                "web_height": 0.20,
+                "web_thickness": 0.009,
+                "flange_width": 0.037,
+                "flange_thickness": 0.020,
+                "area": 0.00237,
+                "J": 1.15e-7,
+                "Iy": 9.5e-6,
+                "Iz": 1.96e-7,
+                "shear_factor_y": 0.55,
+                "shear_factor_z": 0.80,
+                "orientation": (0.0, 0.0, 1.0),
+            },
+            202: {
+                "section_type": "Pipe",
+                "web_height": 0.114,
+                "web_thickness": 0.007,
+                "orientation": (1.0, 0.0, 0.0),
+            },
+            203: {
+                "section_type": "Box",
+                "web_height": 0.12,
+                "web_thickness": 0.006,
+                "flange_thickness": 0.006,
+                "orientation": (0.0, 1.0, 0.0),
+            },
+            204: {
+                "section_type": "FB",
+                "web_height": 0.10,
+                "web_thickness": 0.010,
+                "orientation": (0.0, 1.0, 0.0),
+            },
+            205: {
+                "section_type": "T",
+                "web_height": 0.30,
+                "web_thickness": 0.008,
+                "flange_width": 0.12,
+                "flange_thickness": 0.012,
+                "orientation": (0.0, 0.0, 1.0),
+            },
+        },
+        offsets_of_element={
+            201: ((0.0, 0.0, -0.05), (0.0, 0.0, -0.05)),
+            202: ((0.01, 0.0, 0.0), (0.0, 0.02, -0.03)),
+        },
+        supports=(
+            SesamSupport(node_id=11, dofs=("ux", "uy", "uz", "rx", "ry", "rz")),
+            SesamSupport(node_id=14, dofs=("uz",), prescribed=(0.0, 0.0, -0.005, 0.0, 0.0, 0.0)),
+        ),
+        gravity=(0.0, 0.0, -9.81),
+        nodal_loads_by_case={
+            1: {12: (100.0, 0.0, -250.0, 0.0, 0.0, 10.0)},
+            2: {16: (0.0, 500.0, 0.0, 0.0, 0.0, 0.0)},
+        },
+        pressure_by_case={
+            1: {101: -12000.0, 102: -5000.0},
+            2: {101: -20000.0},
+        },
+    )
+
+    out_path = tmp_path / "semantic_export.FEM"
+    report = export_sesam_fem(semantics, out_path)
+    assert report.path == out_path
+    assert report.records_written > 0
+
+    doc = read_sesam_fem_document(out_path)
+    assert sorted(doc.nodes) == [11, 12, 13, 14, 15, 16]
+    assert sorted(doc.elements) == [101, 102, 201, 202, 203, 204, 205]
+    assert doc.materials[2].poisson_ratio == 0.0
+
+    rebuilt = read_sesam_semantics(out_path)
+    assert rebuilt.mesh.quads == {101: (11, 12, 13, 14)}
+    assert rebuilt.mesh.tris == {102: (11, 12, 15)}
+    assert rebuilt.mesh.beams[201] == (11, 12)
+    assert rebuilt.thickness_of_element[101] == pytest.approx(0.025)
+    assert rebuilt.thickness_of_element[102] == pytest.approx(0.012)
+    assert rebuilt.local_axes_of_element[101]["x"] == pytest.approx((0.0, 1.0, 0.0))
+    assert rebuilt.local_axes_of_element[101]["y"] == pytest.approx((-1.0, 0.0, 0.0))
+    assert rebuilt.section_of_element[201]["section_type"] == "L-bulb"
+    assert rebuilt.section_of_element[201]["shear_factor_y"] == pytest.approx(0.55)
+    assert rebuilt.section_of_element[201]["shear_factor_z"] == pytest.approx(0.80)
+    assert rebuilt.section_of_element[201]["orientation"] == pytest.approx((0.0, 0.0, 1.0))
+    assert rebuilt.section_of_element[202]["section_type"] == "Pipe"
+    assert rebuilt.section_of_element[202]["area"] > 0.0
+    assert rebuilt.section_of_element[203]["section_type"] == "Box"
+    assert rebuilt.section_of_element[204]["section_type"] == "FB"
+    assert rebuilt.section_of_element[205]["section_type"] == "T"
+    assert rebuilt.offsets_of_element[201] == ((0.0, 0.0, -0.05), (0.0, 0.0, -0.05))
+    assert rebuilt.offsets_of_element[202] == ((0.01, 0.0, 0.0), (0.0, 0.02, -0.03))
+    assert len(rebuilt.supports) == 2
+    assert rebuilt.supports[1].prescribed == pytest.approx((0.0, 0.0, -0.005, 0.0, 0.0, 0.0))
+    assert rebuilt.gravity == pytest.approx((0.0, 0.0, -9.81))
+    assert rebuilt.nodal_loads_by_case[1][12] == pytest.approx((100.0, 0.0, -250.0, 0.0, 0.0, 10.0))
+    assert rebuilt.nodal_loads_by_case[2][16] == pytest.approx((0.0, 500.0, 0.0, 0.0, 0.0, 0.0))
+    assert rebuilt.pressure_by_case == {
+        1: {101: pytest.approx(-12000.0), 102: pytest.approx(-5000.0)},
+        2: {101: pytest.approx(-20000.0)},
+    }
+
+
+def test_export_sesam_fem_from_deck_model_and_invalid_input(tmp_path: Path) -> None:
+    anymesher = pytest.importorskip("anymesher")
+    anymaterial = pytest.importorskip("anymaterial")
+    import numpy as np
+    from anyfileio import DeckModel, DeckSupport
+
+    mesh = anymesher.Mesh(
+        nodes={1: np.array([0.0, 0.0, 0.0]), 2: np.array([1.0, 0.0, 0.0]), 3: np.array([0.0, 1.0, 0.0])},
+        tris={10: (1, 2, 3)},
+    )
+    steel = anymaterial.MaterialSpec(
+        name="Steel",
+        symmetry="isotropic",
+        constants={"elastic_modulus": 2.1e11, "poisson_ratio": 0.3},
+        density=7850.0,
+    )
+    deck = DeckModel(
+        mesh=mesh,
+        materials={"steel": steel},
+        material_of_element={10: "steel"},
+        thickness_of_element={10: 0.015},
+        shell_orientation_of_element={10: ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0))},
+        supports=(DeckSupport(node_id=1, dofs=("ux", "uy", "uz")),),
+        nodal_loads={2: (0.0, 0.0, -50.0, 0.0, 0.0, 0.0)},
+        pressure_of_element={10: 2500.0},
+    )
+    out = tmp_path / "from_deck.FEM"
+    export_sesam_fem(deck, out)
+    rebuilt = read_sesam_semantics(out)
+    assert rebuilt.thickness_of_element[10] == pytest.approx(0.015)
+    assert rebuilt.pressure_of_element[10] == pytest.approx(2500.0)
+    assert rebuilt.nodal_loads_by_case[1][2] == pytest.approx((0.0, 0.0, -50.0, 0.0, 0.0, 0.0))
+
+    bad_out = tmp_path / "never_created.FEM"
+    with pytest.raises(SesamFemError) as exc_info:
+        export_sesam_fem(object(), bad_out)
+    assert exc_info.value.code == "FEM203"
+    assert not bad_out.exists()
