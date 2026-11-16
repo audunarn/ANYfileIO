@@ -760,6 +760,9 @@ def _parse_element_identity(
         values = record.numeric_fields
         if len(values) < 4:
             continue  # Reported by the element pass.
+        # Raw numbering belongs to the record header, not to the set of
+        # topologies implemented by the typed reader.  Unsupported elements
+        # still occupy internal numbers referenced by the rest of the file.
         layout = _element_layout(record, [])
         if layout is None or layout[1] != 4:
             continue
@@ -1007,6 +1010,18 @@ def _element_layout(
     diagnostics: list[FemDiagnostic],
 ) -> Optional[tuple[int, int]]:
     values = record.numeric_fields
+    # A full header has ELNOX, ELNO, ELTYP, ELTYAD.  An unsupported ELTYP
+    # with the ordinary zero ELTYAD must not be reinterpreted as a compact
+    # record merely because ELNO happens to equal a supported type number.
+    # Compact connectivity has positive node numbers at positions 2 and 3.
+    if len(values) >= 4 and values[3] == 0:
+        try:
+            type_code = strict_int(values[2], field_name="element type", record=record)
+        except SesamFemError as exc:
+            diagnostics.extend(exc.diagnostics)
+            return None
+        if type_code > 0:
+            return type_code, 4
     candidate_indices = (2, 1)
     for index in candidate_indices:
         if len(values) <= index:

@@ -1,0 +1,120 @@
+name: Editable geometry interchange
+
+on:
+  workflow_dispatch:
+    inputs:
+      geometry_ref:
+        description: ANYgeometry candidate ref with interchange and parameter-matching APIs
+        required: true
+        default: main
+      provider_ref:
+        description: ANYfileio-occt candidate ref containing editable interchange
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  base-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install ".[dev]"
+      - name: Verify base does not install geometry or native providers
+        shell: python
+        run: |
+          import importlib.util
+          for name in ('anygeometry', 'anyfileio_occt', 'OCP'):
+              assert importlib.util.find_spec(name) is None, name
+          import anyfileio.geometry
+      - run: python -m pytest -q -o pythonpath= tests/test_geometry.py tests/test_geometry_identity.py tests/test_backends.py tests/test_layering.py
+
+  native-installed:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      ANYGEOMETRY_BUILD_NATIVE: '0'
+      ANYGEOMETRY_REQUIRE_NATIVE: '0'
+      ANYGEOMETRY_DISABLE_NATIVE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: core
+      - uses: actions/checkout@v4
+        with:
+          repository: audunarn/ANYgeometry
+          ref: ${{ inputs.geometry_ref }}
+          path: geometry
+      - uses: actions/checkout@v4
+        with:
+          repository: audunarn/ANYfileio-occt
+          ref: ${{ inputs.provider_ref }}
+          path: provider
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade "setuptools>=77.0.3" wheel build pytest
+      - run: python -m pip wheel --no-deps --no-build-isolation ./core ./geometry ./provider --wheel-dir wheels
+      - name: Install candidate wheels and native runtime
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess, sys
+          wheels = [str(p) for p in Path('wheels').glob('*.whl')]
+          subprocess.run([sys.executable, '-m', 'pip', 'install', *wheels,
+                          'cadquery-ocp-novtk==7.9.3.1.1', 'shapely==2.2.0'], check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'check'], check=True)
+      - name: Verify installed origins and native import
+        shell: python
+        run: |
+          import importlib
+          from pathlib import Path
+          import sys
+          for name in ('anyfileio', 'anygeometry', 'anyfileio_occt', 'OCP'):
+              module = importlib.import_module(name)
+              assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), name
+      - name: Copy interchange tests outside the source trees
+        shell: python
+        run: |
+          from pathlib import Path
+          import shutil
+          target = Path('installed-checks')
+          target.mkdir()
+          sources = [Path('core/tests/test_geometry.py'),
+                     Path('core/tests/test_geometry_identity.py'),
+                     Path('geometry/tests/test_curve_parameter_matching.py')]
+          sources += [Path('provider/tests') / name for name in (
+              'test_native_geometry.py', 'test_surface_interchange.py',
+              'test_shared_supports.py', 'test_topology_interchange.py',
+              'test_ruled_reconstruction.py', 'test_plane_nurbs_trims.py',
+              'test_clipped_plane_nurbs_import.py', 'test_literal_locations.py',
+              'test_export_section_work.py', 'test_cad_reference_geometry.py',
+              'test_output_references.py', 'test_geometry_association.py',
+              'test_member_station_export.py', 'test_geometry_precision.py',
+              'test_foreign_brep_interop.py')]
+          for source in sources:
+              shutil.copy2(source, target / source.name)
+      - name: Exercise installed interchange candidates
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess, sys
+          tests = Path('installed-checks').resolve()
+          subprocess.run([
+              sys.executable, '-m', 'pytest', '-q', '--import-mode=importlib',
+              '-o', 'pythonpath=' + tests.as_posix(), '-o', 'junit_family=legacy', str(tests),
+              '--junitxml=geometry-interchange.xml'], check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: geometry-interchange-${{ matrix.os }}
+          path: geometry-interchange.xml

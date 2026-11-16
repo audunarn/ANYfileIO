@@ -1,5 +1,9 @@
 # ANYgeometry 0.2 structural CAD adapter contract
 
+> Historical version-specific contract. The authorized current implementation
+> uses [GEOMETRY_INTERCHANGE.md](GEOMETRY_INTERCHANGE.md); this file retains the
+> original protocol/identity evidence and does not claim current implementation.
+
 Status: frozen read-only adapter contract for ANYgeometry 0.2.1, document
 schema 4, and ANYfileio-occt 0.1.
 

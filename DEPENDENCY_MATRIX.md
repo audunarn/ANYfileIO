@@ -1,5 +1,24 @@
 # ANYfileIO / OCCT CAD dependency and qualification matrix
 
+## Current editable-interchange development amendment — 2026-10-26
+
+The user-authorized editable-interchange plan replaces historical provider
+dependency assumptions for the current source candidate: ANYfileio-occt consumes
+`ANYfileio>=0.3.2,<0.4`; its geometry extra consumes
+`ANYgeometry>=0.4.7,<0.5`. The base remains NumPy-only. Historical rows below
+retain their original evidence and do not establish current acceptance.
+See `docs/GEOMETRY_INTERCHANGE.md`, its coverage matrix and living task record.
+Source and installed Windows checks are recorded there; new CI workflow cells
+remain UNRUN until actually executed. No publishing/default-change authority is
+created by this amendment.
+
+Merge dependency: the tested ANYgeometry wheel includes owner work not yet in
+ANYgeometry main (`c5eb6ef`), including `line_ranges`, `interchange` and their
+NURBS support dependencies. The version range alone does not establish that API
+capability. Keep the scoped file-I/O branches unmerged until the required owner
+work is delivered and the committed package combination is checked. No existing
+dirty owner changes are included by this task's branch publication.
+
 Status: frozen dependency metadata and explicit qualification ledger for the
 ANYfileIO 0.3 / ANYfileio-occt 0.1 implementation line.
 

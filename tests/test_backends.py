@@ -274,6 +274,17 @@ def test_available_formats_requires_an_already_ready_backend(monkeypatch) -> Non
     assert {"step", "iges"} <= {item.name for item in available_formats()}
 
 
+def test_asset_backend_without_assembly_is_ready_without_advertising_hierarchy(monkeypatch):
+    from dataclasses import replace
+    backend = _Backend()
+    backend.capabilities = replace(backend.capabilities, assembly=False)
+    _install_entry_points(monkeypatch, _EntryPoint(lambda: backend))
+    assert _load_backend() is backend
+    formats = {item.name: item for item in available_formats()}
+    assert "step" in formats
+    assert "assembly" not in formats["step"].capabilities
+
+
 def test_step_iges_and_brep_suffixes_are_constant_time_and_unambiguous() -> None:
     mapping = {suffix: item.name for item in known_formats() for suffix in item.suffixes}
     assert mapping[".step"] == mapping[".stp"] == "step"
@@ -303,6 +314,8 @@ def test_brep_requires_declared_capability(monkeypatch) -> None:
 
 def test_supported_suffixes_include_core_known_cad_suffixes() -> None:
     assert supported_suffixes() == (
+        ".anygeometry.json",
+        ".anygeometry.json.gz",
         ".brep",
         ".dat",
         ".fem",

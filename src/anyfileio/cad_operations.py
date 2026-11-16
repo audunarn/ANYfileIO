@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pathlib
 import stat
@@ -32,6 +31,7 @@ from .cad import (
     CadWriteOptions,
     CancellationCheck,
     _bind_tessellation,
+    cad_import_document_id,
 )
 from .cad_backend import _load_backend
 
@@ -220,24 +220,12 @@ def _format_for_path(path: pathlib.Path, *, write: bool = False) -> str:
 
 
 def _import_document_id(manifest: CadManifest) -> str:
-    payload = {
-        "backend_compatibility_version": manifest.backend_compatibility_version,
-        "backend_id": manifest.backend_id,
-        "effective_source_length_unit": manifest.source_length_unit,
-        "heal": manifest.normalized_read_options.heal,
-        "identity_kind": "import",
-        "identity_version": 1,
-        "source_format": manifest.source_format,
-        "source_sha256": manifest.source_sha256,
-    }
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return f"cad-import-v1:{hashlib.sha256(encoded).hexdigest()}"
+    return cad_import_document_id(
+        source_sha256=manifest.source_sha256, source_format=manifest.source_format,
+        effective_source_length_unit=manifest.source_length_unit,
+        heal=manifest.normalized_read_options.heal, backend_id=manifest.backend_id,
+        backend_compatibility_version=manifest.backend_compatibility_version,
+    )
 
 
 def _require_capability(condition: bool, message: str) -> None:

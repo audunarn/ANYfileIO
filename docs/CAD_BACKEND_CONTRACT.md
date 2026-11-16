@@ -118,6 +118,13 @@ reader or make `import anyfileio` fail.
 
 ## 3. Formats and capabilities
 
+Current editable-interchange amendment: assembly hierarchy support is optional
+and independently advertised. A provider with otherwise complete protocol-1
+STEP/IGES asset operations may be ready with `assembly=False`.
+`available_formats()` then omits `assembly` from the STEP descriptor; it must
+not advertise hierarchy preservation. This does not establish editable geometry
+or assembly parity; see `GEOMETRY_INTERCHANGE.md` and the coverage matrix.
+
 `FormatDescriptor` is an immutable, slots-based core record with these fields:
 
 ```text
@@ -181,10 +188,15 @@ CadDocument
 
 They are dependency-free apart from NumPy. Public annotations and stored
 values contain no OCP, CadQuery, `anyfileio_occt`, or ANYgeometry type. In
-particular, core code never imports, copies, recreates, string-shadows, or
-validates ANYgeometry `EntityHandle` identity or its entity-kind catalogue.
+particular, these CAD asset records do not import, copy, recreate, string-shadow,
+or validate ANYgeometry `EntityHandle` identity or its entity-kind catalogue.
 The adapter-only structural report is specified in
 [`ANYGEOMETRY_0_2_ADAPTER.md`](ANYGEOMETRY_0_2_ADAPTER.md).
+The opt-in editable geometry facade is a separate operation boundary: its
+actual-file output identity and public owner-handle checks are defined in
+[`GEOMETRY_INTERCHANGE.md`](GEOMETRY_INTERCHANGE.md#editable-cad-output-identity).
+Those checks leave the legacy generated `cad-geometry-v1` recipe and mapping
+semantics in this contract unchanged.
 
 ### 4.1 Normalized options
 
@@ -286,6 +298,10 @@ cad-geometry-v1:<64 lower-case SHA-256 hex>
 
 For imported CAD, the hash input is canonical UTF-8 JSON (`sort_keys=True`,
 compact separators, `ensure_ascii=False`, `allow_nan=False`) of:
+
+Providers use the public `anyfileio.cad.cad_import_document_id(...)` helper for
+this derivation. The core validator delegates to the same implementation;
+providers must not introduce filename-dependent or ad hoc identity recipes.
 
 ```text
 identity_kind = "import"

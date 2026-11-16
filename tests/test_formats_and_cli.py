@@ -82,6 +82,8 @@ def frd_file(tmp_path):
 
 def test_every_suffix_is_described_and_dispatched(fem_file, frd_file) -> None:
     assert supported_suffixes() == (
+        ".anygeometry.json",
+        ".anygeometry.json.gz",
         ".brep",
         ".dat",
         ".fem",
@@ -166,7 +168,7 @@ def test_formats_lists_builtin_cli_readers_only(capsys) -> None:
     code, payload = _json_run(capsys, "--json", "formats")
 
     assert code == 0
-    assert set(payload) == {".dat", ".fem", ".frd", ".inp", ".sif"}
+    assert set(payload) == {".anygeometry.json", ".anygeometry.json.gz", ".dat", ".fem", ".frd", ".inp", ".sif"}
 
 
 def test_inspect_summarizes_a_fem_document(capsys, fem_file) -> None:

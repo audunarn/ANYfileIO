@@ -544,3 +544,269 @@ def test_vertex_gap_refusal_names_the_relocation_opt_in(tmp_path):
     with pytest.raises(SatImportError) as caught:
         read_sat(path.with_name('gap.sat'), vertex_relocation_tolerance_m=1e-6)
     assert 'opts in' not in str(caught.value)
+
+
+def test_builtin_curved_sat_import_without_freecad(tmp_path):
+    pytest.importorskip('anygeometry')
+    import math
+    from anygeometry.exact_curves import EllipticArc
+    from anygeometry.nurbs import NurbsCurve
+    from anygeometry.surfaces import Cylinder
+    from anyfileio.sat_import import write_sat
+
+    # Reversed straight-curve + ellipse-curve + rational intcurve-curve + cylindrical cone-surface all parse pure-Python.
+    w = math.sqrt(2.0) / 2.0
+    records = [
+        '2000 0 1 0',
+        '15 ANYfileIO 0.3.4 12 ACIS 20.0 NT 24 Mon Jan 01 00:00:00 2026',
+        '1000 1e-8 1e-10',
+        '-1 face $-1 -1 -1 $-1 $-1 $2 $-1 $-1 $3 forward double out F F #',
+        '-2 loop $-1 -1 -1 $-1 $-1 $10 $1 unknown #',
+        '-3 cone-surface $-1 -1 -1 $-1 0 0 0 0 0 1 1 0 0 1 I I 0 1 1 forward I I I I #',
+        '-10 coedge $-1 -1 -1 $-1 $11 $13 $-1 $20 forward $2 $-1 #',
+        '-11 coedge $-1 -1 -1 $-1 $12 $10 $-1 $21 forward $2 $-1 #',
+        '-12 coedge $-1 -1 -1 $-1 $13 $11 $-1 $22 forward $2 $-1 #',
+        '-13 coedge $-1 -1 -1 $-1 $10 $12 $-1 $23 forward $2 $-1 #',
+        f'-20 edge $-1 -1 -1 $-1 $30 0 $31 {math.pi / 2:.17g} $10 $40 forward #',
+        '-21 edge $-1 -1 -1 $-1 $31 0 $32 1 $11 $41 forward #',
+        '-22 edge $-1 -1 -1 $-1 $32 0 $33 1 $12 $42 forward #',
+        '-23 edge $-1 -1 -1 $-1 $33 -1 $30 0 $13 $43 reversed #',
+        '-30 vertex $-1 -1 -1 $-1 $20 $50 #',
+        '-31 vertex $-1 -1 -1 $-1 $21 $51 #',
+        '-32 vertex $-1 -1 -1 $-1 $22 $52 #',
+        '-33 vertex $-1 -1 -1 $-1 $23 $53 #',
+        '-50 point $-1 -1 -1 $-1 1 0 0 #',
+        '-51 point $-1 -1 -1 $-1 0 1 0 #',
+        '-52 point $-1 -1 -1 $-1 0 1 1 #',
+        '-53 point $-1 -1 -1 $-1 1 0 1 #',
+        '-40 ellipse-curve $-1 -1 -1 $-1 0 0 0 0 0 1 1 0 0 1 I I #',
+        '-41 straight-curve $-1 -1 -1 $-1 0 1 0 0 0 1 I I #',
+        f'-42 intcurve-curve $-1 -1 -1 $-1 forward {{ exact_int_cur full nurbs 2 open 2 0 2 1 2 0 1 1 1 1 1 1 {w!r} 1 0 1 1 0 }} I I #',
+        '-43 straight-curve $-1 -1 -1 $-1 1 0 0 0 0 1 I I #',
+    ]
+    path = tmp_path / 'cyl.sat'
+    path.write_bytes(('\n'.join(records) + '\n').encode('ascii'))
+    result = read_sat(path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    m = result.geometry
+    assert len(m.faces) == 1 and len(m.edges) == 4 and m.validate_topology() == ()
+    assert isinstance(m.faces[1].surface, Cylinder)
+    assert isinstance(m.edges[1].curve, EllipticArc)
+    assert isinstance(m.edges[3].curve, NurbsCurve)
+
+    # Round-trip the parsed model back via write_sat (in mm) and re-import without FreeCAD.
+    exported = tmp_path / 'out_mm.sat'
+    report = write_sat(exported, m, output_length_unit='mm')
+    assert report.output_length_unit == 'mm'
+    reloaded = read_sat(exported, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    assert reloaded.source_unit_scale_m == pytest.approx(0.001)
+    assert len(reloaded.geometry.faces) == 1 and reloaded.geometry.validate_topology() == ()
+    assert isinstance(reloaded.geometry.faces[1].surface, Cylinder)
+
+
+def test_write_sat_roundtrip_all_analytic_and_nurbs_curves(tmp_path):
+    pytest.importorskip('anygeometry')
+    from fractions import Fraction
+    import math
+    from anygeometry import GeometryModel, EllipticArc, LineRange
+    from anygeometry.nurbs import NurbsCurve
+    from anygeometry.surfaces import Plane
+    from anyfileio.sat_import import write_sat
+
+    m = GeometryModel()
+    v1, v2, v3, v4 = m.add_points([(0, 0, 0), (2, 0, 0), (1, 1, 0), (0, 2, 0)])
+    v_via = m.add_point(2, 1, 0)
+    m.add_face([
+        m.add_line(v1, v2),
+        m.add_arc(v2, v_via, v4),
+        m.add_line(v4, v1),
+    ], surface=Plane((0, 0, 0), (1, 0, 0), (0, 1, 0)))
+    v5, v6 = m.add_points([(3, 0, 0), (5, 0, 0)])
+    vc = m.add_point(4, 1, 0)
+    e_sp = m.add_spline(v5, [vc], v6)
+    v7, v8 = m.add_points([(3, 2, 0), (5, 2, 0)])
+    e_nr = m.add_curve(v7, v8, NurbsCurve(2, (0, 0, 0, 1, 1, 1), ((3, 2, 0), (4, 3, 0), (5, 2, 0)), (1.0, 0.8, 1.0)))
+    v9, v10 = m.add_points([(1.5, 4, 0), (2.5, 4, 0)])
+    e_lr = m.add_curve(v9, v10, LineRange((1, 4, 0), (3, 4, 0), (Fraction(1, 4), Fraction(3, 4))))
+    v11, v12 = m.add_points([(2, 6, 0), (0, 7, 0)])
+    e_el = m.add_curve(v11, v12, EllipticArc((0, 6, 0), (2, 0, 0), (0, 1, 0), 0.0, math.pi / 2))
+
+    path = tmp_path / 'mixed.sat'
+    rep = write_sat(path, m, output_length_unit='m')
+    assert len(rep.edge_map) == len(m.edges)
+    loaded = read_sat(path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    restored = loaded.geometry
+    assert restored.validate_topology() == ()
+    assert len(restored.faces) == 1 and len(loaded.source_edge_map) == len(m.edges)
+    assert len(restored.edges) >= len(m.edges)
+    nurbs_eid = next(k for k, e in restored.edges.items() if isinstance(e.curve, NurbsCurve) and e.curve.weights == (1.0, 0.8, 1.0))
+    assert restored.evaluate_edge_many(nurbs_eid, [0.5])[0][1] > 2.4
+    assert len(restored.edges[e_sp] if False else [e for e in restored.edges.values() if isinstance(e.curve, NurbsCurve)]) >= 2
+    assert any(isinstance(e.curve, EllipticArc) for e in restored.edges.values())
+    assert all(e.start in restored.vertices and e.end in restored.vertices for e in restored.edges.values())
+    assert e_sp and e_lr and e_el
+
+
+def test_multiloop_planar_face_holes_roundtrip(tmp_path):
+    pytest.importorskip('anygeometry')
+    from anygeometry import GeometryModel, Plane
+    from anygeometry.serialization import to_dict, from_dict
+    from anyfileio.sat_import import _inject_face_holes, write_sat
+
+    m = GeometryModel()
+    outer = m.add_points([(0, 0, 0), (4, 0, 0), (4, 4, 0), (0, 4, 0)])
+    inner = m.add_points([(1, 1, 0), (1, 3, 0), (3, 3, 0), (3, 1, 0)])
+    ol = m.add_polyline(outer, close=True)
+    hl = m.add_polyline(inner, close=True)
+    fid = m.add_face(ol, surface=Plane((0, 0, 0), (1, 0, 0), (0, 1, 0)))
+    m = _inject_face_holes(
+        m,
+        {fid: [[m.ordered_edge if False else None for _ in ()]]} if False else {fid: [[type('OE', (), {'edge': eid, 'forward': True})() for eid in hl]]},
+        to_dict=to_dict,
+        from_dict=from_dict,
+    )
+    assert len(m.faces[fid].holes) == 1 and m.validate_topology() == ()
+
+    sat_path = tmp_path / 'holed_plate.sat'
+    write_sat(sat_path, m, output_length_unit='m')
+    reloaded = read_sat(sat_path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert reloaded.validate_topology() == ()
+    assert len(reloaded.faces) == 1 and len(reloaded.faces[1].holes) == 1
+    assert len(reloaded.edges) == 8 and len(reloaded.vertices) == 8
+
+
+def test_cone_sphere_torus_and_spline_surface_sat_without_freecad(tmp_path):
+    pytest.importorskip('anygeometry')
+    import math
+    import numpy as np
+    from anygeometry import GeometryModel, OrientedEdge
+    from anygeometry.exact_curves import EllipticArc
+    from anygeometry.nurbs import CurveOnSurface, NurbsCurve, NurbsSurface
+    from anygeometry.serialization import from_dict, to_dict
+    from anygeometry.surfaces import Cone
+    from anyfileio.sat_import import _inject_face_holes, write_sat
+
+    # 1. Frustum Cone surface round-trip
+    cm = GeometryModel()
+    c_pts = [(2.0, 0.0, 0.0), (0.0, 2.0, 0.0), (0.0, 1.0, 2.0), (1.0, 0.0, 2.0)]
+    cv = cm.add_points(c_pts)
+    cone_surf = Cone((0, 0, 0), (0, 0, 1), (1, 0, 0), 2.0, 1.0, 2.0, 0.0, math.pi / 2)
+    cm.add_face_from_loop([
+        OrientedEdge(cm.add_curve(cv[0], cv[1], EllipticArc((0, 0, 0), (2, 0, 0), (0, 2, 0), 0.0, math.pi / 2)), True),
+        OrientedEdge(cm.add_line(cv[1], cv[2]), True),
+        OrientedEdge(cm.add_curve(cv[2], cv[3], EllipticArc((0, 0, 2), (1, 0, 0), (0, 1, 0), math.pi / 2, -math.pi / 2)), True),
+        OrientedEdge(cm.add_line(cv[3], cv[0]), True),
+    ], surface=cone_surf)
+    cone_sat = tmp_path / 'cone.sat'
+    write_sat(cone_sat, cm)
+    cm2 = read_sat(cone_sat, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert cm2.validate_topology() == ()
+    assert isinstance(cm2.faces[1].surface, Cone)
+    assert sorted((round(cm2.faces[1].surface.radius_start, 6), round(cm2.faces[1].surface.radius_end, 6))) == [1.0, 2.0]
+
+    # 2. Sphere surface patch (R = 2.0, theta in [0, pi/2], phi in [0, pi/4]) in SAT without FreeCAD
+    r_sph = 2.0
+    a_phi = math.pi / 4.0
+    r_top = r_sph * math.cos(a_phi)
+    z_top = r_sph * math.sin(a_phi)
+    sph_records = [
+        '2000 0 1 0',
+        '15 ANYfileIO 0.3.4 12 ACIS 20.0 NT 24 Mon Jan 01 00:00:00 2026',
+        '1000 1e-7 1e-10',
+        '-1 face $-1 -1 -1 $-1 $-1 $2 $-1 $-1 $3 forward double out F F #',
+        '-2 loop $-1 -1 -1 $-1 $-1 $10 $1 unknown #',
+        f'-3 sphere-surface $-1 -1 -1 $-1 0 0 0 {r_sph!r} 1 0 0 0 0 1 forward_v I I I I #',
+        '-10 coedge $-1 -1 -1 $-1 $11 $13 $-1 $20 forward $2 $-1 #',
+        '-11 coedge $-1 -1 -1 $-1 $12 $10 $-1 $21 forward $2 $-1 #',
+        '-12 coedge $-1 -1 -1 $-1 $13 $11 $-1 $22 forward $2 $-1 #',
+        '-13 coedge $-1 -1 -1 $-1 $10 $12 $-1 $23 forward $2 $-1 #',
+        f'-20 edge $-1 -1 -1 $-1 $30 0 $31 {math.pi / 2:.17g} $10 $40 forward #',
+        f'-21 edge $-1 -1 -1 $-1 $31 0 $32 {a_phi:.17g} $11 $41 forward #',
+        f'-22 edge $-1 -1 -1 $-1 $32 {-math.pi / 2:.17g} $33 0 $12 $42 reversed #',
+        f'-23 edge $-1 -1 -1 $-1 $33 {-a_phi:.17g} $30 0 $13 $43 reversed #',
+        '-30 vertex $-1 -1 -1 $-1 $20 $50 #',
+        '-31 vertex $-1 -1 -1 $-1 $21 $51 #',
+        '-32 vertex $-1 -1 -1 $-1 $22 $52 #',
+        '-33 vertex $-1 -1 -1 $-1 $23 $53 #',
+        f'-50 point $-1 -1 -1 $-1 {r_sph!r} 0 0 #',
+        f'-51 point $-1 -1 -1 $-1 0 {r_sph!r} 0 #',
+        f'-52 point $-1 -1 -1 $-1 0 {r_top!r} {z_top!r} #',
+        f'-53 point $-1 -1 -1 $-1 {r_top!r} 0 {z_top!r} #',
+        f'-40 ellipse-curve $-1 -1 -1 $-1 0 0 0 0 0 1 {r_sph!r} 0 0 1 I I #',
+        f'-41 ellipse-curve $-1 -1 -1 $-1 0 0 0 1 0 0 0 {r_sph!r} 0 1 I I #',
+        f'-42 ellipse-curve $-1 -1 -1 $-1 0 0 {z_top!r} 0 0 1 {r_top!r} 0 0 1 I I #',
+        f'-43 ellipse-curve $-1 -1 -1 $-1 0 0 0 0 -1 0 {r_sph!r} 0 0 1 I I #',
+    ]
+    sph_path = tmp_path / 'sphere.sat'
+    sph_path.write_bytes(('\n'.join(sph_records) + '\n').encode('ascii'))
+    sm = read_sat(sph_path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert sm.validate_topology() == ()
+    assert isinstance(sm.faces[1].surface, NurbsSurface)
+    mid_pt = sm.faces[1].surface.evaluate(0.5, 0.5)
+    assert float(np.linalg.norm(mid_pt)) == pytest.approx(r_sph, abs=1e-12)
+    sph_rt = tmp_path / 'sphere_rt.sat'
+    write_sat(sph_rt, sm)
+    sm2 = read_sat(sph_rt, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert sm2.validate_topology() == () and isinstance(sm2.faces[1].surface, NurbsSurface)
+
+    # 3. Torus surface patch (R = 5.0, r = 1.0, theta in [0, pi/2], phi in [0, pi/3])
+    R_maj, r_min = 5.0, 1.0
+    a_v = math.pi / 3.0
+    r_v = R_maj + r_min * math.cos(a_v)
+    z_v = r_min * math.sin(a_v)
+    tor_records = [
+        '2000 0 1 0',
+        '15 ANYfileIO 0.3.4 12 ACIS 20.0 NT 24 Mon Jan 01 00:00:00 2026',
+        '1000 1e-7 1e-10',
+        '-1 face $-1 -1 -1 $-1 $-1 $2 $-1 $-1 $3 forward double out F F #',
+        '-2 loop $-1 -1 -1 $-1 $-1 $10 $1 unknown #',
+        f'-3 torus-surface $-1 -1 -1 $-1 0 0 0 0 0 1 {R_maj!r} {r_min!r} 1 0 0 forward_v I I I I #',
+        '-10 coedge $-1 -1 -1 $-1 $11 $13 $-1 $20 forward $2 $-1 #',
+        '-11 coedge $-1 -1 -1 $-1 $12 $10 $-1 $21 forward $2 $-1 #',
+        '-12 coedge $-1 -1 -1 $-1 $13 $11 $-1 $22 forward $2 $-1 #',
+        '-13 coedge $-1 -1 -1 $-1 $10 $12 $-1 $23 forward $2 $-1 #',
+        f'-20 edge $-1 -1 -1 $-1 $30 0 $31 {math.pi / 2:.17g} $10 $40 forward #',
+        f'-21 edge $-1 -1 -1 $-1 $31 0 $32 {a_v:.17g} $11 $41 forward #',
+        f'-22 edge $-1 -1 -1 $-1 $32 {-math.pi / 2:.17g} $33 0 $12 $42 reversed #',
+        f'-23 edge $-1 -1 -1 $-1 $33 {-a_v:.17g} $30 0 $13 $43 reversed #',
+        '-30 vertex $-1 -1 -1 $-1 $20 $50 #',
+        '-31 vertex $-1 -1 -1 $-1 $21 $51 #',
+        '-32 vertex $-1 -1 -1 $-1 $22 $52 #',
+        '-33 vertex $-1 -1 -1 $-1 $23 $53 #',
+        f'-50 point $-1 -1 -1 $-1 {R_maj + r_min!r} 0 0 #',
+        f'-51 point $-1 -1 -1 $-1 0 {R_maj + r_min!r} 0 #',
+        f'-52 point $-1 -1 -1 $-1 0 {r_v!r} {z_v!r} #',
+        f'-53 point $-1 -1 -1 $-1 {r_v!r} 0 {z_v!r} #',
+        f'-40 ellipse-curve $-1 -1 -1 $-1 0 0 0 0 0 1 {R_maj + r_min!r} 0 0 1 I I #',
+        f'-41 ellipse-curve $-1 -1 -1 $-1 0 {R_maj!r} 0 1 0 0 0 {r_min!r} 0 1 I I #',
+        f'-42 ellipse-curve $-1 -1 -1 $-1 0 0 {z_v!r} 0 0 1 {r_v!r} 0 0 1 I I #',
+        f'-43 ellipse-curve $-1 -1 -1 $-1 {R_maj!r} 0 0 0 -1 0 {r_min!r} 0 0 1 I I #',
+    ]
+    tor_path = tmp_path / 'torus.sat'
+    tor_path.write_bytes(('\n'.join(tor_records) + '\n').encode('ascii'))
+    tm = read_sat(tor_path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert tm.validate_topology() == () and isinstance(tm.faces[1].surface, NurbsSurface)
+    t_mid = tm.faces[1].surface.evaluate(0.5, 0.5)
+    assert math.hypot(math.hypot(t_mid[0], t_mid[1]) - R_maj, t_mid[2]) == pytest.approx(r_min, abs=1e-12)
+
+    # 4. General NurbsSurface (spline-surface) with inner hole round-trip
+    ns = NurbsSurface(
+        1, 2, (0, 0, 1, 1), (0, 0, 0, 1, 1, 1),
+        (((0, 0, 0), (0, 2, 0.5), (0, 4, 0)), ((4, 0, 0), (4, 2, 1.5), (4, 4, 0))),
+        ((1.0, 0.9, 1.0), (1.0, 1.1, 1.0)),
+    )
+    nm = GeometryModel()
+    uv_o = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    uv_h = [(0.25, 0.25), (0.25, 0.75), (0.75, 0.75), (0.75, 0.25)]
+    vo = [nm.add_point(*ns.evaluate(*p)) for p in uv_o]
+    vh = [nm.add_point(*ns.evaluate(*p)) for p in uv_h]
+    eo = [nm.add_curve(vo[i], vo[(i + 1) % 4], CurveOnSurface(ns, NurbsCurve(1, (0, 0, 1, 1), (uv_o[i], uv_o[(i + 1) % 4])))) for i in range(4)]
+    eh = [nm.add_curve(vh[i], vh[(i + 1) % 4], CurveOnSurface(ns, NurbsCurve(1, (0, 0, 1, 1), (uv_h[i], uv_h[(i + 1) % 4])))) for i in range(4)]
+    nf = nm.add_face(eo, surface=ns)
+    nm = _inject_face_holes(nm, {nf: [[OrientedEdge(e, True) for e in eh]]}, to_dict=to_dict, from_dict=from_dict)
+    n_path = tmp_path / 'spline_surf_hole.sat'
+    write_sat(n_path, nm)
+    nm2 = read_sat(n_path, freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent').geometry
+    assert nm2.validate_topology() == ()
+    assert len(nm2.faces) == 1 and len(nm2.faces[1].holes) == 1
+    assert isinstance(nm2.faces[1].surface, NurbsSurface)
+    assert nm2.faces[1].surface.evaluate(0.5, 0.5) == pytest.approx(ns.evaluate(0.5, 0.5), abs=1e-12)

@@ -67,6 +67,8 @@ class GenieConceptDocument:
     sat: "SatIndex"
     thicknesses: dict[str, float]
     sections: dict[str, str]
+    unit_scale_m: float = 1.0
+    sat_unit_scale_m: float = 1.0
 
 
 _ENTITY = re.compile(rb"(?m)^-(\d+)\s+([^\s]+)\s+(.*?)#", re.DOTALL)
@@ -214,33 +216,67 @@ def _embedded_sat(root: ET.Element) -> bytes:
         raise GenieSatError(f"invalid embedded SAT: {error}") from error
 
 
-def read_genie_concept(path: str | Path) -> GenieConceptDocument:
+_UNIT_SCALES_M = {"m": 1.0, "mm": 0.001, "cm": 0.01}
+
+
+def _sat_header_unit_scale_m(sat_data: bytes, default_scale_m: float) -> float:
+    lines = sat_data.splitlines()
+    if len(lines) >= 3:
+        parts = lines[2].split()
+        if parts:
+            try:
+                value = float(parts[0]) / 1000.0
+                if math.isfinite(value) and value > 0.0:
+                    return value
+            except ValueError:
+                pass
+    return default_scale_m
+
+
+def read_genie_concept(path: str | Path, *, allow_unit_conversion: bool = False) -> GenieConceptDocument:
     """Read the GeniE concept export and verify every structural SAT reference."""
     root = ET.parse(path).getroot()
     if root.tag != "DNV_structure_concept_protocol":
         raise GenieSatError(f"unexpected XML root {root.tag!r}")
     units = root.find("./model/units/model_units")
-    if units is None or units.get("length") != "m":
-        raise GenieSatError("initial GeniE route requires explicit metre model units")
-    sat = SatIndex(_embedded_sat(root))
+    unit_name = units.get("length") if units is not None else None
+    if not allow_unit_conversion:
+        if unit_name != "m":
+            raise GenieSatError("initial GeniE route requires explicit metre model units")
+        unit_scale_m = 1.0
+    else:
+        if unit_name not in _UNIT_SCALES_M:
+            raise GenieSatError(f"unsupported GeniE model length unit {unit_name!r}")
+        unit_scale_m = _UNIT_SCALES_M[unit_name]
+    raw_sat = _embedded_sat(root)
+    sat = SatIndex(raw_sat)
+    sat_unit_scale_m = _sat_header_unit_scale_m(raw_sat, unit_scale_m)
     domain = root.find("./model/structure_domain")
     if domain is None:
         raise GenieSatError("GeniE XML lacks structure_domain")
-    thicknesses = {element.get("name"): float(element.find("constant_thickness").get("th"))
-                   for element in domain.findall("./properties/thicknesses/thickness")}
-    sections = {element.get("name"): next(iter(element)).tag
-                for element in domain.findall("./properties/sections/section")}
+    thicknesses = {
+        element.get("name"): float(const.get("th")) * unit_scale_m
+        for element in domain.findall("./properties/thicknesses/thickness")
+        if (const := element.find("constant_thickness")) is not None and element.get("name")
+    }
+    sections = {
+        element.get("name"): next(iter(element)).tag
+        for element in domain.findall("./properties/sections/section")
+        if element.get("name") and len(element) >= 1
+    }
     structures = []
     for wrapper in domain.findall("./structures/structure"):
         if len(wrapper) != 1:
             raise GenieSatError("structure wrapper must contain one concept")
         item = wrapper[0]
         segments = item.find("segments")
-        segment = segments[0] if segments is not None and len(segments) == 1 else None
-        faces = tuple(face.get("face_ref") for face in item.iter("face"))
-        edges = tuple(edge.get("edge_ref") for edge in item.iter("edge"))
-        endpoints = tuple(tuple(float(pos.get(axis)) for axis in ("x", "y", "z"))
-                          for pos in item.iter("position"))
+        segment = segments[0] if segments is not None and len(segments) >= 1 else None
+        faces = tuple(face.get("face_ref") for face in item.iter("face") if face.get("face_ref"))
+        edges = tuple(edge.get("edge_ref") for edge in item.iter("edge") if edge.get("edge_ref"))
+        endpoints = tuple(
+            tuple(float(pos.get(axis)) * unit_scale_m for axis in ("x", "y", "z"))
+            for pos in item.iter("position")
+        )
         for face in faces:
             sat.face(face)
         for edge in edges:
@@ -250,4 +286,4 @@ def read_genie_concept(path: str | Path) -> GenieConceptDocument:
             item.get("thickness_ref"),
             segment.get("section_ref") if segment is not None else None,
             faces, edges, endpoints))
-    return GenieConceptDocument(tuple(structures), sat, thicknesses, sections)
+    return GenieConceptDocument(tuple(structures), sat, thicknesses, sections, unit_scale_m, sat_unit_scale_m)
