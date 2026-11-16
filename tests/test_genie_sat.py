@@ -225,3 +225,262 @@ def test_genie_holes_cone_and_nurbs_surface_roundtrip(tmp_path):
     assert len(rebuilt.faces[mapping["PerforatedPlate"][1]].holes) == 1
     assert isinstance(rebuilt.faces[mapping["ConeTransition"][1]].surface, Cone)
     assert isinstance(rebuilt.faces[mapping["CurvedPanel"][1]].surface, NurbsSurface)
+
+
+def _zip_sat_cdata(sat_data: bytes) -> str:
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("afiles_0.sat", sat_data)
+    return f"<cdata_segment>{base64.b64encode(stream.getvalue()).decode()}</cdata_segment>"
+
+
+def test_genie_sections_materials_local_axes_and_offsets_roundtrip(tmp_path):
+    pytest.importorskip("anygeometry")
+    from anygeometry import GeometryModel
+    from anygeometry.serialization import from_dict, to_dict
+    from anygeometry.surfaces import Cylinder, Plane
+    from anyfileio import (
+        GenieBeamOffset,
+        GenieMaterial,
+        GenieSection,
+        reconstruct_genie_geometry,
+        write_genie_concept,
+    )
+
+    # 1. Build a rich XML with all 7+ GeniE cross-section families, material properties,
+    #    local_system, curve_orientation fallback, offsets, and eccentricities.
+    records = [
+        "-100 face $-1 -1 -1 $-1 $-1 $110 $-1 $-1 $700 forward double out #",
+        "-110 loop $-1 -1 -1 $-1 $-1 $120 $100 #",
+        "-600 string_attrib-name_attrib-gen-attrib $-1 -1 $-1 $-1 $100 2 1 @6 dnvscp @12 FACE00000001 #",
+        "-700 plane-surface $-1 -1 -1 $-1 0 0 0 0 0 1 1 0 0 forward_v I I I I #",
+    ]
+    pts = [(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0)]
+    for i, pt in enumerate(pts):
+        j = (i + 1) % 4
+        dx = pts[j][0] - pt[0]
+        dy = pts[j][1] - pt[1]
+        length = (dx * dx + dy * dy) ** 0.5
+        ux, uy = dx / length, dy / length
+        records.extend([
+            f"-{120 + i} coedge $-1 -1 -1 $-1 ${120 + j} ${120 + (i - 1) % 4} $-1 ${200 + i} forward $110 $-1 #",
+            f"-{200 + i} edge $-1 -1 -1 $-1 ${300 + i} 0 ${300 + j} {length} ${120 + i} ${500 + i} forward #",
+            f"-{300 + i} vertex $-1 -1 -1 $-1 ${200 + i} ${400 + i} #",
+            f"-{400 + i} point $-1 -1 -1 $-1 {pt[0]} {pt[1]} {pt[2]} #",
+            f"-{500 + i} straight-curve $-1 -1 -1 $-1 {pt[0]} {pt[1]} {pt[2]} {ux} {uy} 0 I I #",
+            f"-{610 + i} string_attrib-name_attrib-gen-attrib $-1 -1 $-1 $-1 ${200 + i} 2 1 @6 dnvscp @12 EDGE0000000{i + 1} #",
+        ])
+    sat_payload = ("2000 0 1 0\n" + "\n".join(records)).encode()
+    encoded = _zip_sat_cdata(sat_payload)
+
+    xml_path = tmp_path / "rich_genie.xml"
+    xml_path.write_text(f"""<DNV_structure_concept_protocol><model><units><model_units length="m"/></units><structure_domain>
+    <properties>
+      <materials>
+        <material name="AH36" default="true">
+          <isotropic_linear_material youngs_modulus="2.1e11" poissons_ratio="0.3" density="7850" yield_stress="355000000" thermal_expansion="1.2e-5" damping="0.03"/>
+        </material>
+      </materials>
+      <thicknesses>
+        <thickness name="Pl_12"><constant_thickness th="0.012"/></thickness>
+      </thicknesses>
+      <sections>
+        <section name="H300"><i_section h="0.3" b="0.3" tw="0.0085" tf="0.014" sfy="1" sfz="1" fabrication="rolled" general_properties_method="computed"/></section>
+        <section name="T300"><unsymmetrical_i_section h="0.3" tw="0.008" bftop="0" bftop1="0" tftop="0" bfbot="0.12" bfbot1="0.06" tfbot="0.012" sfy="1" sfz="1"/></section>
+        <section name="Pipe114"><pipe_section od="0.114" th="0.007" sfy="1" sfz="1"/></section>
+        <section name="Box120"><box_section h="0.12" b="0.12" tw="0.006" tftop="0.006" tfbot="0.006" sfy="1" sfz="1"/></section>
+        <section name="FB100x10"><bar_section h="0.1" b="0.01" sfy="1" sfz="1"/></section>
+        <section name="L150x75x8"><l_section h="0.15" b="0.075" tw="0.008" tf="0.008" sfy="1" sfz="1"/></section>
+        <section name="UNP100" description="NVS lib"><channel_section h="0.1" b="0.05" tw="0.006" tf="0.0085" fillet_radius="0.0045" sfy="1" sfz="1"/></section>
+        <section name="HPbulb160" description="TYPE 20 Ro HPbulb">
+          <l_section h="0.16" b="0.029" tw="0.007" tf="0.0155" sfy="1" sfz="1" general_properties_method="library">
+            <libraryGeneralSection area="0.00146" ix="4.19e-8" iy="3.76e-6" iz="7.32e-8" shcenz="-0.0554" wymin="3.88e-5"/>
+          </l_section>
+        </section>
+        <section name="ConeSec">
+          <tapered_section sfy="1" sfz="1" general_properties_method="computed">
+            <section1><pipe_section od="0.4" th="0.012"/></section1>
+            <section2><pipe_section od="0.5" th="0.014"/></section2>
+          </tapered_section>
+        </section>
+      </sections>
+    </properties>
+    <structures>
+      <structure>
+        <flat_plate name="Deck" thickness_ref="Pl_12" material_ref="AH36">
+          <local_system><vector x="0" y="0" z="1" dir="z"/></local_system>
+          <geometry><face face_ref="FACE00000001"/></geometry>
+        </flat_plate>
+      </structure>
+      <structure>
+        <straight_beam name="GirderAligned">
+          <local_system>
+            <vector x="1" y="0" z="0" dir="x"/>
+            <vector x="0" y="1" z="0" dir="y"/>
+            <vector x="0" y="0" z="1" dir="z"/>
+          </local_system>
+          <segments>
+            <straight_segment index="1" section_ref="H300" material_ref="AH36"><edge edge_ref="EDGE00000001"/></straight_segment>
+          </segments>
+          <curve_offset><reparameterized_beam_curve_offset><curve_offset><aligned_curve_offset alignment="flush_top" constant_value="0.02"/></curve_offset></reparameterized_beam_curve_offset></curve_offset>
+        </straight_beam>
+      </structure>
+      <structure>
+        <straight_beam name="StiffenerBulb">
+          <curve_orientation><customizable_curve_orientation use_default_rule="false"><orientation><local_system>
+            <xvector x="0" y="1" z="0"/><yvector x="-1" y="0" z="0"/><zvector x="0" y="0" z="1"/>
+          </local_system></orientation></customizable_curve_orientation></curve_orientation>
+          <segments>
+            <straight_segment index="1" section_ref="HPbulb160" material_ref="AH36"><edge edge_ref="EDGE00000002"/></straight_segment>
+          </segments>
+          <curve_offset><constant_curve_offset use_local_system="true"><constant_offset x="0" y="0" z="-0.08"/></constant_curve_offset></curve_offset>
+        </straight_beam>
+      </structure>
+      <structure>
+        <straight_beam name="BraceVarying">
+          <segments>
+            <straight_segment index="1" section_ref="Pipe114" material_ref="AH36"><edge edge_ref="EDGE00000003"/></straight_segment>
+            <straight_segment index="2" section_ref="UNP100" material_ref="AH36"><edge edge_ref="EDGE00000004"/></straight_segment>
+          </segments>
+          <curve_offset><linear_varying_curve_offset use_local_system="false"><offset_end1 x="0.01" y="0.02" z="-0.03"/><offset_end2 x="0.04" y="0.05" z="-0.06"/></linear_varying_curve_offset></curve_offset>
+          <eccentricities><eccentricity end="1" x="0.01" y="0" z="0.02"/><eccentricity end="2" x="0.03" y="0" z="0.04"/></eccentricities>
+        </straight_beam>
+      </structure>
+    </structures>
+    <geometry><sat_embedded_sequence encoding="base64" compression="zip">{encoded}</sat_embedded_sequence></geometry>
+    </structure_domain></model></DNV_structure_concept_protocol>""")
+
+    doc = read_genie_concept(xml_path)
+    mat = doc.materials["AH36"]
+    assert mat.is_default is True
+    assert mat.elastic_modulus == pytest.approx(2.1e11)
+    assert mat.poisson_ratio == pytest.approx(0.3)
+    assert mat.density == pytest.approx(7850.0)
+    assert mat.yield_stress == pytest.approx(355e6)
+    assert mat.thermal_expansion == pytest.approx(1.2e-5)
+    assert mat.damping == pytest.approx(0.03)
+
+    expected_families = {
+        "H300": "I",
+        "T300": "unsymmetrical_I",
+        "Pipe114": "pipe",
+        "Box120": "box",
+        "FB100x10": "bar",
+        "L150x75x8": "angle",
+        "UNP100": "channel",
+        "HPbulb160": "bulb",
+        "ConeSec": "tapered",
+    }
+    for sname, family in expected_families.items():
+        assert doc.section_details[sname].section_family == family
+    assert doc.section_details["H300"].dimensions == pytest.approx({"h": 0.3, "b": 0.3, "tw": 0.0085, "tf": 0.014})
+    assert doc.section_details["H300"].shear_factors == (1.0, 1.0)
+    assert doc.section_details["HPbulb160"].library_properties["area"] == pytest.approx(0.00146)
+    assert doc.section_details["ConeSec"].tapered_ends is not None
+    assert doc.section_details["ConeSec"].tapered_ends[1].dimensions["od"] == pytest.approx(0.5)
+
+    by_name = {s.name: s for s in doc.structures}
+    assert by_name["Deck"].local_z == (0.0, 0.0, 1.0)
+    assert by_name["GirderAligned"].local_x == (1.0, 0.0, 0.0)
+    assert by_name["GirderAligned"].offset == GenieBeamOffset(
+        kind="aligned", alignment="flush_top", constant_value=pytest.approx(0.02), reparameterized=True
+    )
+    assert by_name["StiffenerBulb"].local_x == (0.0, 1.0, 0.0)
+    assert by_name["StiffenerBulb"].local_z == (0.0, 0.0, 1.0)
+    assert by_name["StiffenerBulb"].offset == GenieBeamOffset(
+        kind="constant", use_local_system=True, start=(0.0, 0.0, -0.08), end=(0.0, 0.0, -0.08)
+    )
+    assert by_name["BraceVarying"].offset == GenieBeamOffset(
+        kind="linear_varying", use_local_system=False, start=(0.01, 0.02, -0.03), end=(0.04, 0.05, -0.06)
+    )
+    assert by_name["BraceVarying"].eccentricity_start == (0.01, 0.0, 0.02)
+    assert by_name["BraceVarying"].eccentricity_end == (0.03, 0.0, 0.04)
+    assert [seg.section for seg in by_name["BraceVarying"].segments] == ["Pipe114", "UNP100"]
+
+    model, mapping = reconstruct_genie_geometry(doc)
+    assert model.validate_topology() == ()
+    assert from_dict(to_dict(model)).validate_topology() == ()
+    deck_meta = model.faces[mapping["Deck"][1]].metadata
+    assert deck_meta["material_properties"]["youngs_modulus"] == pytest.approx(2.1e11)
+    assert tuple(deck_meta["local_z"]) == (0.0, 0.0, 1.0)
+    girder_meta = model.members[mapping["GirderAligned"][1]].metadata
+    assert girder_meta["section_family"] == "I"
+    assert girder_meta["section_dimensions"]["h"] == pytest.approx(0.3)
+    assert girder_meta["curve_offset"]["alignment"] == "flush_top"
+
+    # 2. Export + re-import preserving all sections (plus explicit sections/materials arguments).
+    extra_sections = {
+        sname: sec for sname, sec in doc.section_details.items()
+    }
+    rt_xml = tmp_path / "rich_roundtrip.xml"
+    write_genie_concept(rt_xml, model, sections=extra_sections, materials=doc.materials)
+    doc2 = read_genie_concept(rt_xml)
+    model2, mapping2 = reconstruct_genie_geometry(doc2)
+    assert model2.validate_topology() == ()
+    assert from_dict(to_dict(model2)).validate_topology() == ()
+    assert doc2.materials["AH36"].youngs_modulus == pytest.approx(2.1e11)
+    assert doc2.section_details["HPbulb160"].section_family == "bulb"
+    assert doc2.section_details["HPbulb160"].library_properties["iy"] == pytest.approx(3.76e-6)
+    assert doc2.section_details["ConeSec"].tapered_ends[0].dimensions["od"] == pytest.approx(0.4)
+    by_name2 = {s.name: s for s in doc2.structures}
+    assert by_name2["GirderAligned"].offset.alignment == "flush_top"
+    assert by_name2["StiffenerBulb"].offset.start == pytest.approx((0.0, 0.0, -0.08))
+    assert by_name2["BraceVarying"].offset.end == pytest.approx((0.04, 0.05, -0.06))
+    assert by_name2["BraceVarying"].eccentricity_end == pytest.approx((0.03, 0.0, 0.04))
+    assert [seg.section for seg in by_name2["BraceVarying"].segments] == ["Pipe114", "UNP100"]
+    assert tuple(model2.members[mapping2["StiffenerBulb"][1]].metadata["local_y"]) == pytest.approx((-1.0, 0.0, 0.0))
+
+
+def test_genie_unit_conversion_scales_sections_and_offsets(tmp_path):
+    records = [
+        "-601 string_attrib-name_attrib-gen-attrib $-1 -1 $-1 $-1 $200 2 1 @6 dnvscp @12 EDGE00000001 #",
+        "-200 edge $-1 -1 -1 $-1 $300 0 $301 1000 $-1 $500 forward #",
+        "-300 vertex $-1 -1 -1 $-1 $200 $400 #",
+        "-301 vertex $-1 -1 -1 $-1 $200 $401 #",
+        "-400 point $-1 -1 -1 $-1 0 0 0 #",
+        "-401 point $-1 -1 -1 $-1 1000 0 0 #",
+        "-500 straight-curve $-1 -1 -1 $-1 0 0 0 1 0 0 I I #",
+    ]
+    sat_payload = ("2000 0 1 0\n" + "\n".join(records)).encode()
+    encoded = _zip_sat_cdata(sat_payload)
+    xml_path = tmp_path / "mm_rich.xml"
+    xml_path.write_text(f"""<DNV_structure_concept_protocol><model><units><model_units length="mm"/></units><structure_domain>
+    <properties>
+      <sections>
+        <section name="HP200" description="HPbulb">
+          <l_section h="200" b="37" tw="9" tf="20">
+            <libraryGeneralSection area="2365.9" iy="9498540.3" wymin="78175.8" shcenz="-68.4"/>
+          </l_section>
+        </section>
+      </sections>
+    </properties>
+    <structures>
+      <structure>
+        <straight_beam name="BeamMM">
+          <segments>
+            <straight_segment index="1" section_ref="HP200" material_ref="Steel">
+              <geometry><wire><guide><position x="0" y="0" z="0"/><position x="1000" y="0" z="0"/></guide>
+              <sat_reference><edge edge_ref="EDGE00000001"/></sat_reference></wire></geometry>
+            </straight_segment>
+          </segments>
+          <curve_offset><constant_curve_offset use_local_system="true"><constant_offset x="0" y="25" z="-50"/></constant_curve_offset></curve_offset>
+          <eccentricities><eccentricity end="1" x="10" y="20" z="30"/></eccentricities>
+        </straight_beam>
+      </structure>
+    </structures>
+    <geometry><sat_embedded_sequence encoding="base64" compression="zip">{encoded}</sat_embedded_sequence></geometry>
+    </structure_domain></model></DNV_structure_concept_protocol>""")
+
+    doc = read_genie_concept(xml_path, allow_unit_conversion=True)
+    sec = doc.section_details["HP200"]
+    assert sec.section_family == "bulb"
+    assert sec.dimensions["h"] == pytest.approx(0.2)
+    assert sec.dimensions["b"] == pytest.approx(0.037)
+    assert sec.library_properties["area"] == pytest.approx(2365.9e-6)
+    assert sec.library_properties["iy"] == pytest.approx(9498540.3e-12)
+    assert sec.library_properties["wymin"] == pytest.approx(78175.8e-9)
+    assert sec.library_properties["shcenz"] == pytest.approx(-0.0684)
+    beam = doc.structures[0]
+    assert beam.endpoints == ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert beam.offset.start == pytest.approx((0.0, 0.025, -0.05))
+    assert beam.eccentricity_start == pytest.approx((0.01, 0.02, 0.03))

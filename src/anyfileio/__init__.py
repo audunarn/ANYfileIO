@@ -225,8 +225,12 @@ from .genie_geometry import (
     write_genie_concept,
 )
 from .genie_sat import (
+    GenieBeamOffset,
+    GenieBeamSegment,
     GenieConceptDocument,
+    GenieMaterial,
     GenieSatError,
+    GenieSection,
     GenieStructure,
     SatEdge,
     SatEntity,
@@ -247,7 +251,8 @@ __all__ += ['OrcaWavePressureDocument', 'OrcaWavePressureError', 'OrcaWavePressu
 from .orcawave import OrcaWaveMissingOutputError, OrcaWaveUnsupportedFormatError, OrcaWaveInvalidDataError
 __all__ += ['OrcaWaveMissingOutputError', 'OrcaWaveUnsupportedFormatError', 'OrcaWaveInvalidDataError']
 __all__ += [
-    'GenieConceptDocument', 'GenieSatError', 'GenieStructure',
+    'GenieBeamOffset', 'GenieBeamSegment', 'GenieConceptDocument', 'GenieMaterial',
+    'GenieSatError', 'GenieSection', 'GenieStructure',
     'GeometryApproximation', 'GeometryDiagnostic', 'GeometryImportReport',
     'GeometryImportResult', 'GeometryInterchangeError', 'GeometryLeaseReleaseError',
     'GeometryReadOptions', 'GeometryWriteOptions', 'GeometryWriteReport',

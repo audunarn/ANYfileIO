@@ -74,12 +74,25 @@ Pure-Python ACIS version-2000 SAT support (`anyfileio.sat_import`) and
 In `anyfileio.genie_sat` and `anyfileio.genie_geometry`:
 
 - `read_genie_concept(path, *, allow_unit_conversion=False)` retains the
-  default metre requirement and optionally converts `mm`/`cm` XML documents.
+  default metre requirement, optionally converts `mm`/`cm` XML documents, and
+  parses full material properties (`GenieMaterial` / `document.materials`),
+  cross-sections (`GenieSection` / `document.section_details` covering `i_section`,
+  `unsymmetrical_i_section`, `pipe_section`, `box_section`, `bar_section`,
+  `l_section`, `channel_section`, `bulb`/`HPbulb` with `libraryGeneralSection`,
+  and `tapered_section`), local coordinate systems (`local_x`/`local_y`/`local_z`,
+  `sense_flag`), beam offsets/eccentricities (`GenieBeamOffset` covering
+  `aligned_curve_offset`, `constant_curve_offset`, `linear_varying_curve_offset`,
+  and `eccentricities`), and per-segment beam records (`GenieBeamSegment`).
 - `reconstruct_genie_geometry(document, names=None)` reconstructs planar and
   curved plates/shells (including holes), multi-segment straight and curved
-  beams, and structure metadata (`material`, `thickness_ref`, `thickness_m`,
-  `section_ref`, `section_type`). `reconstruct_linear_geometry` remains
-  unchanged.
-- `write_genie_concept(path, geometry, ...)` exports plates/shells and
-  straight/curved/multi-segment beams to `<DNV_structure_concept_protocol>` XML
-  with base64-chunked zipped ACIS 2000 SAT.
+  beams, and structure metadata (`material`, `material_properties`,
+  `thickness_ref`, `thickness_m`, `section_ref`, `section_type`,
+  `section_family`, `section_dimensions`, `section_library_properties`,
+  `local_x`/`local_y`/`local_z`, `sense_flag`, `curve_offset`,
+  `eccentricity_start`/`eccentricity_end`, and per-segment records).
+  `reconstruct_linear_geometry` remains unchanged.
+- `write_genie_concept(path, geometry, *, thicknesses=None, sections=None, materials=None, ...)`
+  exports plates/shells and straight/curved/multi-segment beams to
+  `<DNV_structure_concept_protocol>` XML with `<materials>`, full `<sections>`,
+  `<local_system>`/`<curve_orientation>`, `<curve_offset>`/`<eccentricities>`,
+  and base64-chunked zipped ACIS 2000 SAT.

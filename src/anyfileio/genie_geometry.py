@@ -21,7 +21,13 @@ from .cad_operations import (
     _flush_owned_output,
     _validate_owned_output,
 )
-from .genie_sat import GenieConceptDocument, GenieSatError
+from .genie_sat import (
+    GenieBeamOffset,
+    GenieConceptDocument,
+    GenieMaterial,
+    GenieSatError,
+    GenieSection,
+)
 
 
 def reconstruct_linear_geometry(document: GenieConceptDocument, names: list[str]):
@@ -370,10 +376,16 @@ def reconstruct_genie_geometry(document: GenieConceptDocument, names: list[str] 
                 meta.update(extra_meta)
                 if item.material is not None:
                     meta["material"] = item.material
+                    if item.material in document.materials:
+                        meta["material_properties"] = _material_to_dict(document.materials[item.material])
                 if item.thickness is not None:
                     meta["thickness_ref"] = item.thickness
                     if item.thickness in document.thicknesses:
                         meta["thickness_m"] = document.thicknesses[item.thickness]
+                if item.local_z is not None:
+                    meta["local_z"] = item.local_z
+                if item.sense_flag is not None:
+                    meta["sense_flag"] = item.sense_flag
                 model.set_face_metadata(fid, meta)
                 created_faces.append(fid)
             sheet_queue.append((item, created_faces))
@@ -390,10 +402,44 @@ def reconstruct_genie_geometry(document: GenieConceptDocument, names: list[str] 
         bmeta: dict[str, Any] = {"genie_name": item.name, "genie_kind": item.kind}
         if item.material is not None:
             bmeta["material"] = item.material
+            if item.material in document.materials:
+                bmeta["material_properties"] = _material_to_dict(document.materials[item.material])
         if item.section is not None:
             bmeta["section_ref"] = item.section
-            if item.section in document.sections:
+            if item.section in document.section_details:
+                sec = document.section_details[item.section]
+                bmeta["section_type"] = sec.kind
+                bmeta["section_family"] = sec.section_family
+                if sec.dimensions:
+                    bmeta["section_dimensions"] = dict(sec.dimensions)
+                if sec.library_properties:
+                    bmeta["section_library_properties"] = dict(sec.library_properties)
+                if sec.shear_factors is not None:
+                    bmeta["section_shear_factors"] = list(sec.shear_factors)
+                if sec.fabrication is not None:
+                    bmeta["section_fabrication"] = sec.fabrication
+                if sec.general_properties_method is not None:
+                    bmeta["section_general_properties_method"] = sec.general_properties_method
+                if sec.description is not None:
+                    bmeta["section_description"] = sec.description
+                if sec.tapered_ends is not None:
+                    bmeta["section_tapered_ends"] = [_section_to_dict(end) for end in sec.tapered_ends]
+            elif item.section in document.sections:
                 bmeta["section_type"] = document.sections[item.section]
+        for axis_key, vec in (("local_x", item.local_x), ("local_y", item.local_y), ("local_z", item.local_z)):
+            if vec is not None:
+                bmeta[axis_key] = vec
+        if item.eccentricity_start is not None:
+            bmeta["eccentricity_start"] = item.eccentricity_start
+        if item.eccentricity_end is not None:
+            bmeta["eccentricity_end"] = item.eccentricity_end
+        if item.offset is not None and item.offset.kind != "none":
+            bmeta["curve_offset"] = _offset_to_dict(item.offset)
+        if len(item.segments) > 1 or any(
+            s.section != item.section or s.material != item.material or s.eccentricity_start is not None or s.eccentricity_end is not None
+            for s in item.segments
+        ):
+            bmeta["segments"] = [_segment_to_dict(seg) for seg in item.segments]
         mid = model.add_member(chain, name=item.name, metadata=bmeta)
         mapping[item.name] = ("member", mid)
 
@@ -403,12 +449,217 @@ def reconstruct_genie_geometry(document: GenieConceptDocument, names: list[str] 
     return model, mapping
 
 
+def _material_to_dict(material: GenieMaterial | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(material, GenieMaterial):
+        raw: dict[str, Any] = {
+            "kind": material.kind,
+            "is_default": material.is_default,
+            "youngs_modulus": material.youngs_modulus,
+            "poissons_ratio": material.poissons_ratio,
+            "density": material.density,
+            "yield_stress": material.yield_stress,
+            "thermal_expansion": material.thermal_expansion,
+            "damping": material.damping,
+        }
+    else:
+        raw = {
+            "kind": str(material.get("kind") or "isotropic_linear_material"),
+            "is_default": bool(material.get("is_default", False)),
+            "youngs_modulus": material.get("youngs_modulus", material.get("elastic_modulus")),
+            "poissons_ratio": material.get("poissons_ratio", material.get("poisson_ratio")),
+            "density": material.get("density"),
+            "yield_stress": material.get("yield_stress"),
+            "thermal_expansion": material.get("thermal_expansion"),
+            "damping": material.get("damping"),
+        }
+    return {k: v for k, v in raw.items() if v is not None}
+
+
+def _section_to_dict(spec: str | GenieSection | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(spec, str):
+        return {"kind": spec}
+    if isinstance(spec, GenieSection):
+        out: dict[str, Any] = {
+            "kind": spec.kind,
+            "section_family": spec.section_family,
+        }
+        if spec.dimensions:
+            out["dimensions"] = dict(spec.dimensions)
+        if spec.shear_factors is not None:
+            out["shear_factors"] = list(spec.shear_factors)
+        if spec.fabrication is not None:
+            out["fabrication"] = spec.fabrication
+        if spec.general_properties_method is not None:
+            out["general_properties_method"] = spec.general_properties_method
+        if spec.description is not None:
+            out["description"] = spec.description
+        if spec.is_default:
+            out["is_default"] = True
+        if spec.library_properties:
+            out["library_properties"] = dict(spec.library_properties)
+        if spec.tapered_ends is not None:
+            out["tapered_ends"] = [_section_to_dict(end) for end in spec.tapered_ends]
+        return out
+    out = {"kind": str(spec.get("kind") or spec.get("section_type") or "bar")}
+    for key in (
+        "section_family", "dimensions", "shear_factors", "fabrication",
+        "general_properties_method", "description", "is_default",
+        "library_properties", "tapered_ends",
+    ):
+        if key in spec and spec[key] is not None:
+            out[key] = dict(spec[key]) if isinstance(spec[key], Mapping) else spec[key]
+    return out
+
+
+def _offset_to_dict(offset: GenieBeamOffset) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "kind": offset.kind,
+        "use_local_system": offset.use_local_system,
+        "reparameterized": offset.reparameterized,
+    }
+    if offset.alignment is not None:
+        out["alignment"] = offset.alignment
+    if offset.constant_value is not None:
+        out["constant_value"] = float(offset.constant_value)
+    if offset.start is not None:
+        out["start"] = offset.start
+    if offset.end is not None:
+        out["end"] = offset.end
+    return out
+
+
+def _segment_to_dict(seg: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "index": seg.index,
+        "kind": seg.kind,
+        "edge_names": seg.edge_names,
+    }
+    if seg.material is not None:
+        out["material"] = seg.material
+    if seg.section is not None:
+        out["section"] = seg.section
+    if seg.eccentricity_start is not None:
+        out["eccentricity_start"] = seg.eccentricity_start
+    if seg.eccentricity_end is not None:
+        out["eccentricity_end"] = seg.eccentricity_end
+    return out
+
+
+def _merge_section_from_meta(target: dict[str, Any], meta: Mapping[str, Any]) -> None:
+    mappings = (
+        ("section_family", "section_family", str),
+        ("section_dimensions", "dimensions", dict),
+        ("section_library_properties", "library_properties", dict),
+        ("section_shear_factors", "shear_factors", tuple),
+        ("section_fabrication", "fabrication", str),
+        ("section_general_properties_method", "general_properties_method", str),
+        ("section_description", "description", str),
+        ("section_tapered_ends", "tapered_ends", list),
+    )
+    for meta_key, target_key, caster in mappings:
+        if target_key not in target and meta_key in meta and meta[meta_key] is not None:
+            target[target_key] = caster(meta[meta_key])
+
+
+def _emit_section_child(parent_el: ET.Element, spec: Mapping[str, Any]) -> None:
+    attrs: dict[str, str] = {}
+    dims = spec.get("dimensions")
+    if isinstance(dims, Mapping):
+        for key, val in dims.items():
+            attrs[str(key)] = repr(float(val))
+    if spec.get("fabrication"):
+        attrs["fabrication"] = str(spec["fabrication"])
+    sf = spec.get("shear_factors")
+    if sf is not None and len(sf) >= 2:
+        attrs["sfy"] = repr(float(sf[0]))
+        attrs["sfz"] = repr(float(sf[1]))
+    if spec.get("general_properties_method"):
+        attrs["general_properties_method"] = str(spec["general_properties_method"])
+    kind = str(spec.get("kind") or "bar")
+    child = ET.SubElement(parent_el, kind, attrs)
+    lib = spec.get("library_properties")
+    if isinstance(lib, Mapping) and lib:
+        ET.SubElement(child, "libraryGeneralSection", {str(k): repr(float(v)) for k, v in lib.items()})
+    tapered = spec.get("tapered_ends")
+    if kind == "tapered_section" and tapered is not None and len(tapered) == 2:
+        s1 = ET.SubElement(child, "section1")
+        _emit_section_child(s1, _section_to_dict(tapered[0]))
+        s2 = ET.SubElement(child, "section2")
+        _emit_section_child(s2, _section_to_dict(tapered[1]))
+
+
+def _vec3_attrs(vec: Any) -> dict[str, str]:
+    return {"x": repr(float(vec[0])), "y": repr(float(vec[1])), "z": repr(float(vec[2]))}
+
+
+def _emit_local_system(parent_el: ET.Element, meta: Mapping[str, Any], *, include_curve_orientation: bool = False) -> None:
+    lx, ly, lz = meta.get("local_x"), meta.get("local_y"), meta.get("local_z")
+    sense_flag = meta.get("sense_flag")
+    if lx is None and ly is None and lz is None and sense_flag is None:
+        return
+    if include_curve_orientation and lx is not None and ly is not None and lz is not None:
+        co = ET.SubElement(parent_el, "curve_orientation")
+        cco = ET.SubElement(co, "customizable_curve_orientation", {"use_default_rule": "false"})
+        ori = ET.SubElement(cco, "orientation")
+        ols = ET.SubElement(ori, "local_system")
+        ET.SubElement(ols, "xvector", _vec3_attrs(lx))
+        ET.SubElement(ols, "zvector", _vec3_attrs(lz))
+        ET.SubElement(ols, "yvector", _vec3_attrs(ly))
+    ls = ET.SubElement(parent_el, "local_system")
+    if sense_flag is not None:
+        ET.SubElement(ls, "sense_flag", {"sense": "true" if sense_flag else "false"})
+    for axis, vec in (("x", lx), ("y", ly), ("z", lz)):
+        if vec is not None:
+            ET.SubElement(ls, "vector", {**_vec3_attrs(vec), "dir": axis})
+
+
+def _emit_beam_offsets(bel: ET.Element, meta: Mapping[str, Any]) -> None:
+    curve_offset = meta.get("curve_offset")
+    if isinstance(curve_offset, Mapping):
+        okind = curve_offset.get("kind")
+        if okind in ("aligned", "constant", "linear_varying"):
+            co_el = ET.SubElement(bel, "curve_offset")
+            container = co_el
+            if curve_offset.get("reparameterized"):
+                rep = ET.SubElement(co_el, "reparameterized_beam_curve_offset")
+                container = ET.SubElement(rep, "curve_offset")
+            if okind == "aligned":
+                attrs: dict[str, str] = {}
+                if curve_offset.get("alignment") is not None:
+                    attrs["alignment"] = str(curve_offset["alignment"])
+                if curve_offset.get("constant_value") is not None:
+                    attrs["constant_value"] = repr(float(curve_offset["constant_value"]))
+                ET.SubElement(container, "aligned_curve_offset", attrs)
+            elif okind == "constant":
+                uls = "true" if curve_offset.get("use_local_system") else "false"
+                cc_el = ET.SubElement(container, "constant_curve_offset", {"use_local_system": uls})
+                start = curve_offset.get("start")
+                if start is not None:
+                    ET.SubElement(cc_el, "constant_offset", _vec3_attrs(start))
+            elif okind == "linear_varying":
+                uls = "true" if curve_offset.get("use_local_system") else "false"
+                lv_el = ET.SubElement(container, "linear_varying_curve_offset", {"use_local_system": uls})
+                if curve_offset.get("start") is not None:
+                    ET.SubElement(lv_el, "offset_end1", _vec3_attrs(curve_offset["start"]))
+                if curve_offset.get("end") is not None:
+                    ET.SubElement(lv_el, "offset_end2", _vec3_attrs(curve_offset["end"]))
+    ecc_start = meta.get("eccentricity_start")
+    ecc_end = meta.get("eccentricity_end")
+    if ecc_start is not None or ecc_end is not None:
+        eccs_el = ET.SubElement(bel, "eccentricities")
+        if ecc_start is not None:
+            ET.SubElement(eccs_el, "eccentricity", {"end": "1", **_vec3_attrs(ecc_start)})
+        if ecc_end is not None:
+            ET.SubElement(eccs_el, "eccentricity", {"end": "2", **_vec3_attrs(ecc_end)})
+
+
 def write_genie_concept(
     path: str | Path,
     geometry: object,
     *,
     thicknesses: dict[str, float] | None = None,
-    sections: dict[str, str] | None = None,
+    sections: Mapping[str, Any] | None = None,
+    materials: Mapping[str, Any] | None = None,
     default_material: str = "Steel",
     cancellation=None,
 ) -> Path:
@@ -451,9 +702,18 @@ def write_genie_concept(
         return entity_names[key]
 
     th_map = dict(thicknesses or {})
-    sec_map = dict(sections or {})
+    sec_map: dict[str, dict[str, Any]] = {
+        str(k): _section_to_dict(v) for k, v in (sections or {}).items()
+    }
+    mat_map: dict[str, dict[str, Any]] = {
+        str(k): _material_to_dict(v) for k, v in (materials or {}).items()
+    }
     used_faces: set[int] = set()
     used_edges: set[int] = set()
+
+    def ensure_material(name: str, meta: Mapping[str, Any] | Any) -> None:
+        if name not in mat_map and isinstance(meta.get("material_properties"), Mapping):
+            mat_map[name] = _material_to_dict(meta["material_properties"])
 
     def ensure_thickness_ref(meta: Mapping[str, Any] | Any) -> str:
         ref = str(meta.get("thickness_ref") or (next(iter(th_map)) if th_map else "th1"))
@@ -464,12 +724,13 @@ def write_genie_concept(
     def ensure_section_ref(meta: Mapping[str, Any] | Any) -> str:
         ref = str(meta.get("section_ref") or (next(iter(sec_map)) if sec_map else "sec1"))
         if ref not in sec_map:
-            sec_map[ref] = str(meta.get("section_type") or "bar")
+            sec_map[ref] = {"kind": str(meta.get("section_type") or "bar")}
+        _merge_section_from_meta(sec_map[ref], meta)
         return ref
 
     curved_surfaces = (surfaces_mod.Cylinder, surfaces_mod.Cone, nurbs_mod.NurbsSurface)
 
-    plate_specs: list[tuple[str, str, str, str, tuple[str, ...]]] = []
+    plate_specs: list[tuple[str, str, str, str, tuple[str, ...], Mapping[str, Any]]] = []
     for sid in sorted(geometry.sheets):
         sheet = geometry.sheets[sid]
         fids = [geometry.face_uses[u].face_id for u in sheet.face_use_ids]
@@ -481,10 +742,11 @@ def write_genie_concept(
                     used_edges.add(oe.edge)
         first_meta = geometry.faces[fids[0]].metadata if fids else {}
         mat = str(first_meta.get("material") or default_material)
+        ensure_material(mat, first_meta)
         th_ref = ensure_thickness_ref(first_meta)
         is_curved = any(isinstance(geometry.faces[fid].surface, curved_surfaces) for fid in fids)
         kind = "curved_shell" if is_curved else "flat_plate"
-        plate_specs.append((sheet.name or f"Plate_{sid}", kind, mat, th_ref, tuple(name_face(fid) for fid in fids)))
+        plate_specs.append((sheet.name or f"Plate_{sid}", kind, mat, th_ref, tuple(name_face(fid) for fid in fids), first_meta))
 
     for fid in sorted(geometry.faces):
         if fid in used_faces:
@@ -495,28 +757,39 @@ def write_genie_concept(
                 used_edges.add(oe.edge)
         meta = face.metadata
         mat = str(meta.get("material") or default_material)
+        ensure_material(mat, meta)
         th_ref = ensure_thickness_ref(meta)
         kind = "curved_shell" if isinstance(face.surface, curved_surfaces) else "flat_plate"
-        plate_specs.append((str(meta.get("genie_name") or f"Plate_{fid}"), kind, mat, th_ref, (name_face(fid),)))
+        plate_specs.append((str(meta.get("genie_name") or f"Plate_{fid}"), kind, mat, th_ref, (name_face(fid),), meta))
 
-    beam_specs: list[tuple[str, str, str, str, list[tuple[str, str, tuple[float, float, float], tuple[float, float, float]]]]] = []
+    beam_specs: list[tuple[str, str, str, str, list[tuple[str, str, tuple[float, float, float], tuple[float, float, float], str | None, str | None]], Mapping[str, Any]]] = []
     for mid in sorted(geometry.members):
         member = geometry.members[mid]
         eids = [geometry.member_edge_uses[u].edge_id for u in member.edge_use_ids]
         used_edges.update(eids)
         mmeta = member.metadata
         mat = str(mmeta.get("material") or default_material)
+        ensure_material(mat, mmeta)
         sec_ref = ensure_section_ref(mmeta)
         is_curved = any(not isinstance(geometry.edges[eid].curve, (curves_mod.Straight, curves_mod.LineRange)) for eid in eids)
         kind = "curved_beam" if is_curved else "straight_beam"
+        seg_meta_list = mmeta.get("segments") if isinstance(mmeta.get("segments"), (list, tuple)) and len(mmeta.get("segments")) == len(eids) else None
         seg_list = []
-        for eid in eids:
+        for idx, eid in enumerate(eids):
             edge = geometry.edges[eid]
             seg_tag = "straight_segment" if isinstance(edge.curve, (curves_mod.Straight, curves_mod.LineRange)) else "curved_segment"
             p0 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.start))
             p1 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.end))
-            seg_list.append((seg_tag, name_edge(eid), p0, p1))
-        beam_specs.append((member.name or f"Beam_{mid}", kind, mat, sec_ref, seg_list))
+            seg_sec = sec_ref
+            seg_mat = mat
+            if seg_meta_list is not None:
+                smeta = seg_meta_list[idx]
+                if smeta.get("section"):
+                    seg_sec = ensure_section_ref({"section_ref": smeta["section"]})
+                if smeta.get("material"):
+                    seg_mat = str(smeta["material"])
+            seg_list.append((seg_tag, name_edge(eid), p0, p1, seg_sec, seg_mat))
+        beam_specs.append((member.name or f"Beam_{mid}", kind, mat, sec_ref, seg_list, mmeta))
 
     for eid in sorted(geometry.edges):
         if eid in used_edges:
@@ -528,7 +801,7 @@ def write_genie_concept(
         seg_tag = "straight_segment" if is_straight else "curved_segment"
         p0 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.start))
         p1 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.end))
-        beam_specs.append((f"Beam_edge_{eid}", kind, default_material, sec_ref, [(seg_tag, name_edge(eid), p0, p1)]))
+        beam_specs.append((f"Beam_edge_{eid}", kind, default_material, sec_ref, [(seg_tag, name_edge(eid), p0, p1, sec_ref, default_material)], {}))
 
     sat_bytes, _, _, _ = serialize_sat_bytes(
         geometry,
@@ -544,33 +817,54 @@ def write_genie_concept(
     domain_el = ET.SubElement(model_el, "structure_domain")
     props_el = ET.SubElement(domain_el, "properties")
 
+    if mat_map:
+        mat_parent = ET.SubElement(props_el, "materials")
+        for mname, mspec in mat_map.items():
+            mat_attrs: dict[str, str] = {"name": str(mname)}
+            if mspec.get("is_default"):
+                mat_attrs["default"] = "true"
+            mel = ET.SubElement(mat_parent, "material", mat_attrs)
+            child_attrs: dict[str, str] = {}
+            for key in ("youngs_modulus", "poissons_ratio", "density", "yield_stress", "thermal_expansion", "damping"):
+                if key in mspec and mspec[key] is not None:
+                    child_attrs[key] = repr(float(mspec[key]))
+            ET.SubElement(mel, str(mspec.get("kind") or "isotropic_linear_material"), child_attrs)
+
     th_parent = ET.SubElement(props_el, "thicknesses")
     for tname, th_val in th_map.items():
         tel = ET.SubElement(th_parent, "thickness", {"name": str(tname)})
         ET.SubElement(tel, "constant_thickness", {"th": repr(float(th_val))})
 
     sec_parent = ET.SubElement(props_el, "sections")
-    for sname, stag in sec_map.items():
-        sel = ET.SubElement(sec_parent, "section", {"name": str(sname)})
-        ET.SubElement(sel, str(stag))
+    for sname, sspec in sec_map.items():
+        sel_attrs: dict[str, str] = {"name": str(sname)}
+        if sspec.get("description") is not None:
+            sel_attrs["description"] = str(sspec["description"])
+        if sspec.get("is_default"):
+            sel_attrs["default"] = "true"
+        sel = ET.SubElement(sec_parent, "section", sel_attrs)
+        _emit_section_child(sel, sspec)
 
     structs_el = ET.SubElement(domain_el, "structures")
-    for pname, pkind, mat, th_ref, face_refs in plate_specs:
+    for pname, pkind, mat, th_ref, face_refs, pmeta in plate_specs:
         wrap = ET.SubElement(structs_el, "structure")
         pel = ET.SubElement(wrap, pkind, {"name": pname, "thickness_ref": th_ref, "material_ref": mat})
+        _emit_local_system(pel, pmeta, include_curve_orientation=False)
         geom_el = ET.SubElement(pel, "geometry")
         for fref in face_refs:
             ET.SubElement(geom_el, "face", {"face_ref": fref})
 
-    for bname, bkind, mat, sec_ref, seg_list in beam_specs:
+    for bname, bkind, _mat, _sec_ref, seg_list, bmeta in beam_specs:
         wrap = ET.SubElement(structs_el, "structure")
         bel = ET.SubElement(wrap, bkind, {"name": bname})
+        _emit_local_system(bel, bmeta, include_curve_orientation=True)
         segs_el = ET.SubElement(bel, "segments")
-        for seg_tag, eref, p0, p1 in seg_list:
-            seg_el = ET.SubElement(segs_el, seg_tag, {"section_ref": sec_ref, "material_ref": mat})
+        for idx, (seg_tag, eref, p0, p1, seg_sec, seg_mat) in enumerate(seg_list, start=1):
+            seg_el = ET.SubElement(segs_el, seg_tag, {"index": str(idx), "section_ref": str(seg_sec), "material_ref": str(seg_mat)})
             ET.SubElement(seg_el, "edge", {"edge_ref": eref})
             for pt in (p0, p1):
                 ET.SubElement(seg_el, "position", {"x": repr(pt[0]), "y": repr(pt[1]), "z": repr(pt[2])})
+        _emit_beam_offsets(bel, bmeta)
 
     geom_domain = ET.SubElement(domain_el, "geometry")
     sat_seq = ET.SubElement(geom_domain, "sat_embedded_sequence", {"encoding": "base64", "compression": "zip"})
