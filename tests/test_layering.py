@@ -1,6 +1,6 @@
 """The package must not import its own consumers.
 
-ANYsolver consumes files read here; ANYfileio does not consume solvers.  If that
+ANYfeSolver consumes files read here; ANYfileio does not consume solvers.  If that
 arrow ever reverses the family's dependency graph becomes a cycle, and the
 packages can no longer be released independently.  The rule is cheap to state
 and easy to break by accident -- an import added while chasing a discrepancy
@@ -9,7 +9,7 @@ so it is checked rather than documented.
 
 NumPy is the only unconditional third-party dependency.  The semantic mesh and
 material packages sit below this package but are loaded only through the private
-optional-runtime gate.  ANYsolver and ANYfem sit above it and stay forbidden.
+optional-runtime gate.  ANYfeSolver and ANYfem sit above it and stay forbidden.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ SEMANTIC_TYPE_CHECKING_IMPORTS = {
 # Importing any of these would invert the dependency direction.
 FORBIDDEN = frozenset(
     {
+        "anyfesolver",
         "anysolver",
         "anyfem",
         "anystructure",

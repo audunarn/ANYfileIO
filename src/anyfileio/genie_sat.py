@@ -17,6 +17,9 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 
+# ACIS tolerant vertices share the plain vertex layout and add a trailing tolerance.
+_VERTEX_KINDS = ("vertex", "tvertex-vertex")
+
 class GenieSatError(ValueError):
     """The concept export or its named SAT topology is inconsistent."""
 
@@ -121,7 +124,10 @@ class SatIndex:
         return value
 
     def _point(self, vertex: int) -> tuple[float, float, float]:
-        tokens = self.entity(vertex, "vertex").body.split()
+        entity = self.entity(vertex)
+        if entity.kind not in _VERTEX_KINDS:
+            raise GenieSatError(f"SAT entity {vertex} is {entity.kind}, expected vertex")
+        tokens = entity.body.split()
         point_ref = self._ref(next(token for token in reversed(tokens) if token.startswith("$")))
         if point_ref is None:
             raise GenieSatError(f"vertex {vertex} has no point")
@@ -143,7 +149,7 @@ class SatIndex:
         number = self._number(name_or_number)
         self.entity(number, "edge")
         vertex_refs = [int(value) for value in _REF.findall(self.entities[number].body)
-                       if int(value) > 0 and self.entity(int(value)).kind == "vertex"]
+                       if int(value) > 0 and self.entity(int(value)).kind in _VERTEX_KINDS]
         curve_refs = [int(value) for value in _REF.findall(self.entities[number].body)
                       if int(value) > 0 and self.entity(int(value)).kind.endswith("-curve")]
         if len(vertex_refs) != 2 or len(curve_refs) != 1:

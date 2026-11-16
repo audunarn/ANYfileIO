@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.4 - 2026-11-13
+
+- Add standalone SAT geometry import (`read_sat`) with an isolated local curved
+  adapter; admit GeniE law curves, and accept two explicit opt-ins,
+  `vertex_relocation_tolerance_m` and `approximate_curve_tolerance_m` (each in
+  (0, 1e-4] m, default off), recorded in face metadata and diagnostics.
+
+## 0.3.3 - 2026-11-11
+
+- Read SESTRA shell stresses using the reported component order and rotation
+  frame, including relabelled RDSTRESS descriptors and RDPOINTS alternatives.
+- Resolve SESAM beam offsets, material slots and element loads through the
+  semantic reader. The base wheel continues to require only NumPy.
+
 ## 0.3.2 - 2026-09-16
 
 Fixed:
