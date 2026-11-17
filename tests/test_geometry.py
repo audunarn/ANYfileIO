@@ -389,3 +389,60 @@ def test_sat_geometry_facade_roundtrip_and_provenance(tmp_path, monkeypatch):
     for refs in write_report.geometry_to_cad.values():
         assert len(refs) == 1 and isinstance(refs[0], CadEntityRef)
         assert refs[0] in imported.report.cad_to_geometry
+
+
+def test_genie_xml_geometry_facade_roundtrip_and_provenance(tmp_path, monkeypatch):
+    from anyfileio.__main__ import main
+    from anyfileio.cad import CadEntityRef
+    from anyfileio.formats import available_formats, known_formats
+    from anyfileio.geometry import geometry_format
+
+    assert geometry_format(tmp_path / "concept.xml") == "genie-xml"
+    assert geometry_format(tmp_path / "concept.xml", format="genie") == "genie-xml"
+    assert {"sat", "genie-xml"} <= {item.name for item in known_formats()}
+
+    owner, _ = _model()
+    assert {"sat", "genie-xml"} <= {item.name for item in available_formats()}
+
+    # Include plate (sheet), standalone face, multi-edge beam (member), and standalone edge.
+    geometry = owner.GeometryModel()
+    v = geometry.add_points(((0, 0, 0), (3, 0, 0), (3, 2, 0), (0, 2, 0), (4, 0, 0), (5, 0, 0), (6, 0, 0)))
+    face1 = geometry.add_plate(v[:4])
+    geometry.set_face_metadata(face1, {"material": "S355", "thickness_ref": "t20", "thickness_m": 0.02})
+    geometry.add_sheet([face1], name="DeckPlate")
+    geometry.add_plate(geometry.add_points(((0, 5, 0), (1, 5, 0), (1, 6, 0), (0, 6, 0))))
+    e_beam1 = geometry.add_line(v[4], v[5])
+    e_beam2 = geometry.add_line(v[5], v[6])
+    geometry.add_member([e_beam1, e_beam2], name="Girder", metadata={"material": "S355", "section_ref": "bar1", "section_type": "bar"})
+    geometry.add_line(*geometry.add_points(((8, 0, 0), (9, 0, 0))))
+
+    module = importlib.import_module("anyfileio.geometry")
+    monkeypatch.setattr(module, "_provider", lambda name: pytest.fail("GeniE XML facade must not invoke OCCT provider"))
+
+    xml_path = tmp_path / "concept.xml"
+    write_report = write_geometry(xml_path, geometry, options=GeometryWriteOptions(validation_mode="certified"))
+    assert write_report.format == "genie-xml"
+    assert write_report.output_unit == "m"
+    assert write_report.output_document_id
+    assert len(write_report.geometry_to_cad) == 4
+
+    imported = read_geometry(xml_path, options=GeometryReadOptions(validation_mode="certified"))
+    assert imported.report.format == "genie-xml"
+    assert imported.report.source_unit == "m"
+    assert imported.report.source_sha256 == write_report.output_sha256
+    assert imported.geometry.validate_topology() == ()
+    assert len(imported.geometry.sheets) == 2
+    assert len(imported.geometry.members) == 2
+    for refs in write_report.geometry_to_cad.values():
+        assert len(refs) == 1 and isinstance(refs[0], CadEntityRef)
+        assert refs[0] in imported.report.cad_to_geometry
+
+    native_path = tmp_path / "source.anygeometry.json"
+    cli_xml = tmp_path / "from_cli.xml"
+    cli_sat = tmp_path / "from_cli.sat"
+    write_geometry(native_path, geometry)
+    assert main(["--json", "geometry-convert", str(native_path), str(cli_xml)]) == 0
+    assert main(["--json", "geometry-convert", str(cli_xml), str(cli_sat)]) == 0
+    sat_imported = read_geometry(cli_sat)
+    assert sat_imported.report.format == "sat"
+    assert len(sat_imported.geometry.faces) == 2

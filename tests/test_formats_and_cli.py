@@ -91,9 +91,11 @@ def test_every_suffix_is_described_and_dispatched(fem_file, frd_file) -> None:
         ".iges",
         ".igs",
         ".inp",
+        ".sat",
         ".sif",
         ".step",
         ".stp",
+        ".xml",
     )
     assert "SESAM" in describe(fem_file)
     assert "CalculiX" in describe(frd_file)
@@ -168,7 +170,7 @@ def test_formats_lists_builtin_cli_readers_only(capsys) -> None:
     code, payload = _json_run(capsys, "--json", "formats")
 
     assert code == 0
-    assert set(payload) == {".anygeometry.json", ".anygeometry.json.gz", ".dat", ".fem", ".frd", ".inp", ".sif"}
+    assert set(payload) == {".anygeometry.json", ".anygeometry.json.gz", ".dat", ".fem", ".frd", ".inp", ".sat", ".sif", ".xml"}
 
 
 def test_inspect_summarizes_a_fem_document(capsys, fem_file) -> None:
@@ -298,3 +300,81 @@ def test_a_missing_subcommand_is_a_parser_error() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main([])
     assert excinfo.value.code == 2
+
+
+def test_genie_xml_and_sat_are_described_read_and_inspected(capsys, tmp_path) -> None:
+    import base64
+    import io
+    import zipfile
+    from anyfileio.genie_sat import GenieConceptDocument
+
+    sat_text = "\n".join([
+        "2000 0 1 0",
+        "12 ANYfileIO test 11 ACIS 20.0 NT 24 Mon Jan 01 00:00:00 2026",
+        "1000 1e-06 1e-10",
+        "-100 face $600 -1 -1 $-1 $-1 $110 $-1 $-1 $700 forward double out #",
+        "-110 loop $-1 -1 -1 $-1 $-1 $120 $100 #",
+        "-600 string_attrib-name_attrib-gen-attrib $-1 -1 $-1 $-1 $100 2 1 @6 dnvscp @12 FACE00000001 #",
+        "-700 plane-surface $-1 -1 -1 $-1 0 0 0 0 0 1 1 0 0 forward_v I I I I #",
+        "-120 coedge $-1 -1 -1 $-1 $121 $123 $-1 $200 forward $110 $-1 #",
+        "-121 coedge $-1 -1 -1 $-1 $122 $120 $-1 $201 forward $110 $-1 #",
+        "-122 coedge $-1 -1 -1 $-1 $123 $121 $-1 $202 forward $110 $-1 #",
+        "-123 coedge $-1 -1 -1 $-1 $120 $122 $-1 $203 forward $110 $-1 #",
+        "-200 edge $-1 -1 -1 $-1 $300 0 $301 2 $120 $500 forward #",
+        "-201 edge $-1 -1 -1 $-1 $301 0 $302 1 $121 $501 forward #",
+        "-202 edge $-1 -1 -1 $-1 $302 0 $303 2 $122 $502 forward #",
+        "-203 edge $-1 -1 -1 $-1 $303 0 $300 1 $123 $503 forward #",
+        "-300 vertex $-1 -1 -1 $-1 $200 $400 #",
+        "-301 vertex $-1 -1 -1 $-1 $201 $401 #",
+        "-302 vertex $-1 -1 -1 $-1 $202 $402 #",
+        "-303 vertex $-1 -1 -1 $-1 $203 $403 #",
+        "-400 point $-1 -1 -1 $-1 0 0 0 #",
+        "-401 point $-1 -1 -1 $-1 2 0 0 #",
+        "-402 point $-1 -1 -1 $-1 2 1 0 #",
+        "-403 point $-1 -1 -1 $-1 0 1 0 #",
+        "-500 straight-curve $-1 -1 -1 $-1 0 0 0 1 0 0 I I #",
+        "-501 straight-curve $-1 -1 -1 $-1 2 0 0 0 1 0 I I #",
+        "-502 straight-curve $-1 -1 -1 $-1 2 1 0 -1 0 0 I I #",
+        "-503 straight-curve $-1 -1 -1 $-1 0 1 0 0 -1 0 I I #",
+        "End-of-ACIS-data",
+    ])
+    sat_path = tmp_path / "panel.sat"
+    sat_path.write_text(sat_text, encoding="ascii")
+
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("source.sat", sat_text.encode("ascii"))
+    encoded = base64.b64encode(stream.getvalue()).decode("ascii")
+    xml_path = tmp_path / "concept.xml"
+    xml_path.write_text(
+        f'<DNV_structure_concept_protocol><model><units><model_units length="m"/></units>'
+        f'<structure_domain><properties><thicknesses><thickness name="t"><constant_thickness th="0.01"/></thickness></thicknesses></properties>'
+        f'<structures><structure><flat_plate name="Deck" thickness_ref="t" material_ref="Steel"><geometry><face face_ref="FACE00000001"/></geometry></flat_plate></structure></structures>'
+        f'<geometry><sat_embedded_sequence encoding="base64" compression="zip"><cdata_segment>{encoded}</cdata_segment></sat_embedded_sequence></geometry>'
+        f'</structure_domain></model></DNV_structure_concept_protocol>',
+        encoding="utf-8",
+    )
+
+    assert "GeniE" in describe(xml_path)
+    assert "SAT" in describe(sat_path)
+    doc = read(xml_path)
+    assert isinstance(doc, GenieConceptDocument)
+    assert len(doc.structures) == 1
+
+    code, xml_summary = _json_run(capsys, "--json", "inspect", str(xml_path))
+    assert code == 0
+    assert xml_summary["format"] == "genie-xml"
+    assert xml_summary["structures"] == 1
+    assert xml_summary["unit"] == "m"
+
+    pytest.importorskip("anygeometry")
+    from anyfileio.geometry import GeometryImportResult
+
+    sat_result = read(sat_path)
+    assert isinstance(sat_result, GeometryImportResult)
+    assert len(sat_result.geometry.faces) == 1
+    code, sat_summary = _json_run(capsys, "--json", "inspect", str(sat_path))
+    assert code == 0
+    assert sat_summary["format"] == "sat"
+    assert sat_summary["faces"] == 1
+    assert sat_summary["edges"] == 4

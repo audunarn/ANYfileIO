@@ -195,15 +195,19 @@ def _provider(module: str) -> Any:
         ) from error
 
 
-def _sat_document_id(*, sha256: str, length_unit: str) -> str:
+def _builtin_cad_document_id(*, sha256: str, source_format: str, length_unit: str) -> str:
     payload = json.dumps({
         "effective_source_length_unit": length_unit,
         "identity_kind": "import",
         "identity_version": 1,
-        "source_format": "sat",
+        "source_format": source_format,
         "source_sha256": sha256,
     }, sort_keys=True, separators=(",", ":")).encode("ascii")
     return "cad-import-v1:" + hashlib.sha256(payload).hexdigest()
+
+
+def _sat_document_id(*, sha256: str, length_unit: str) -> str:
+    return _builtin_cad_document_id(sha256=sha256, source_format="sat", length_unit=length_unit)
 
 
 def _sat_unit_from_scale(scale_m: float) -> str:
@@ -223,7 +227,15 @@ def geometry_format(path: str | Path, format: str | None = None) -> str:
     if name.endswith((".anygeometry.json", ".anygeometry.json.gz")):
         inferred = "anygeometry"
     else:
-        inferred = {".step": "step", ".stp": "step", ".iges": "iges", ".igs": "iges", ".brep": "brep", ".sat": "sat"}.get(Path(path).suffix.casefold())
+        inferred = {
+            ".step": "step",
+            ".stp": "step",
+            ".iges": "iges",
+            ".igs": "iges",
+            ".brep": "brep",
+            ".sat": "sat",
+            ".xml": "genie-xml",
+        }.get(Path(path).suffix.casefold())
     if format is None:
         if inferred is None:
             raise GeometryInterchangeError("unrecognized geometry filename; specify format explicitly", code="geometry.format.unknown")
@@ -231,7 +243,9 @@ def geometry_format(path: str | Path, format: str | None = None) -> str:
     selected = str(format).casefold()
     if selected in {"native", "json", "json.gz"}:
         selected = "anygeometry"
-    if selected not in {"anygeometry", "step", "iges", "brep", "sat"}:
+    elif selected in {"genie", "genie_xml", "genie-xml", "xml"}:
+        selected = "genie-xml"
+    if selected not in {"anygeometry", "step", "iges", "brep", "sat", "genie-xml"}:
         raise GeometryInterchangeError(f"unsupported geometry format {format!r}", code="geometry.format.unknown")
     if selected != "anygeometry" and inferred is None:
         raise GeometryInterchangeError("CAD geometry requires a matching CAD filename suffix", code="geometry.format.mismatch")
@@ -309,6 +323,41 @@ def read_geometry(path: str | Path, *, format: str | None = None,
             ))
         finally:
             _unlink_owned(snapshot, identity)
+    if selected == "genie-xml":
+        from .cad import CadEntityRef
+        from .genie_geometry import reconstruct_genie_geometry
+        from .genie_sat import GenieSatError, read_genie_concept
+        from .sat_import import SatImportCancelled
+
+        owner = _owner()
+        snapshot, digest, identity = _copy_source_snapshot(target, cancellation=cancellation)
+        try:
+            try:
+                doc = read_genie_concept(snapshot, allow_unit_conversion=True)
+                geometry, mapping = reconstruct_genie_geometry(doc)
+            except SatImportCancelled as error:
+                raise CadOperationCancelled(str(error), code=getattr(error, "code", "cad.operation.cancelled")) from error
+            except GenieSatError as error:
+                raise GeometryInterchangeError(str(error), code="geometry.genie.import_failed") from error
+            source_unit = _sat_unit_from_scale(doc.unit_scale_m)
+            if options.source_length_unit_override is not None and options.source_length_unit_override != source_unit:
+                raise GeometryInterchangeError("GeniE XML source units cannot be overridden", code="geometry.genie.unit_override")
+            if options.validation_mode == "certified":
+                owner.to_dict(geometry, certified=True)
+            _check_cancelled(cancellation)
+            if _sha256_file(snapshot, cancellation) != digest:
+                raise GeometryInterchangeError("GeniE XML source snapshot changed", code="geometry.source.changed")
+            doc_id = _builtin_cad_document_id(sha256=digest, source_format="genie-xml", length_unit=source_unit)
+            cad_to_geometry: dict[Any, Any] = {}
+            for struct_idx, item in enumerate(doc.structures, start=1):
+                kind, entity_id = mapping[item.name]
+                cad_to_geometry[CadEntityRef(doc_id, kind, struct_idx)] = (geometry.handle(kind, entity_id),)
+            return GeometryImportResult(geometry, GeometryImportReport(
+                selected, digest, geometry.model_id, geometry.revision,
+                source_unit, geometry.units, cad_to_geometry=cad_to_geometry,
+            ))
+        finally:
+            _unlink_owned(snapshot, identity)
     adapter = _provider("geometry_import")
     from .cad_operations import read_cad
     document = read_cad(target, options=CadReadOptions(
@@ -350,7 +399,7 @@ def write_geometry(path: str | Path, geometry: Any, *, format: str | None = None
         raise TypeError("geometry must be an ANYgeometry GeometryModel")
     if selected == "anygeometry" and options.output_length_unit is not None and options.output_length_unit != geometry.units:
         raise GeometryInterchangeError("native persistence preserves the model's units", code="geometry.native.unit_conversion")
-    adapter = None if selected in {"anygeometry", "sat"} else _provider("geometry_export")
+    adapter = None if selected in {"anygeometry", "sat", "genie-xml"} else _provider("geometry_export")
     backend = None
     if adapter is not None:
         from .cad_backend import _load_backend
@@ -402,6 +451,40 @@ def write_geometry(path: str | Path, geometry: Any, *, format: str | None = None
                 geometry_to_cad[geometry.handle("edge", eid)] = (CadEntityRef(output_doc_id, "edge", sat_eid),)
             for fid, sat_fid in f_map.items():
                 geometry_to_cad[geometry.handle("face", fid)] = (CadEntityRef(output_doc_id, "face", sat_fid),)
+            report = GeometryWriteReport(
+                selected, model_id, revision, digest, source_unit, output_unit,
+                geometry_to_cad=geometry_to_cad, output_document_id=output_doc_id,
+            )
+        elif selected == "genie-xml":
+            from .cad import CadEntityRef
+            from .genie_geometry import _serialize_genie_concept_bytes
+            from .genie_sat import GenieSatError
+            from .sat_import import SatImportCancelled, SatImportError
+
+            revision = geometry.revision
+            model_id = geometry.model_id
+            output_unit = options.output_length_unit or "m"
+            if output_unit != "m":
+                raise GeometryInterchangeError("GeniE Concept XML requires meter ('m') output units", code="geometry.genie.unit_conversion")
+            if options.validation_mode == "certified":
+                owner.to_dict(geometry, certified=True)
+            try:
+                payload, provenance = _serialize_genie_concept_bytes(
+                    geometry,
+                    cancellation=cancellation,
+                )
+            except SatImportCancelled as error:
+                raise CadOperationCancelled(str(error), code=getattr(error, "code", "cad.operation.cancelled")) from error
+            except (GenieSatError, SatImportError) as error:
+                raise GeometryInterchangeError(str(error), code="geometry.genie.export_failed") from error
+            if (geometry.model_id, geometry.revision) != (model_id, revision):
+                raise GeometryInterchangeError("geometry changed during serialization", code="geometry.revision.changed")
+            temporary.write_bytes(payload)
+            digest = _sha256_file(temporary, cancellation)
+            output_doc_id = _builtin_cad_document_id(sha256=digest, source_format="genie-xml", length_unit=output_unit)
+            geometry_to_cad: dict[Any, Any] = {}
+            for src_kind, src_id, cad_kind, struct_idx in provenance:
+                geometry_to_cad[geometry.handle(src_kind, src_id)] = (CadEntityRef(output_doc_id, cad_kind, struct_idx),)
             report = GeometryWriteReport(
                 selected, model_id, revision, digest, source_unit, output_unit,
                 geometry_to_cad=geometry_to_cad, output_document_id=output_doc_id,

@@ -75,9 +75,10 @@ def _command_formats(args: argparse.Namespace) -> int:
 
 def _command_inspect(args: argparse.Namespace) -> int:
     suffix = Path(args.input).suffix.lower()
-    if Path(args.input).name.casefold().endswith((".anygeometry.json", ".anygeometry.json.gz")):
-        from .geometry import read_geometry
-        result = read_geometry(args.input)
+    if suffix == ".sat" or Path(args.input).name.casefold().endswith((".anygeometry.json", ".anygeometry.json.gz")):
+        from .geometry import GeometryReadOptions, read_geometry
+        options = GeometryReadOptions(source_length_unit_override=args.source_unit) if args.source_unit is not None else None
+        result = read_geometry(args.input, options=options)
         geometry = result.geometry
         summary = {
             "source": str(args.input), "format": result.report.format,
@@ -85,6 +86,26 @@ def _command_inspect(args: argparse.Namespace) -> int:
             "units": geometry.units, "source_sha256": result.report.source_sha256,
             **{name: len(getattr(geometry, name)) for name in
                ("vertices", "edges", "faces", "parts", "sheets", "members")},
+            "diagnostics": [],
+        }
+    elif suffix == ".xml":
+        import hashlib
+        from .genie_sat import read_genie_concept
+        from .geometry import _sat_unit_from_scale
+
+        target = Path(args.input)
+        doc = read_genie_concept(target, allow_unit_conversion=True)
+        summary = {
+            "source": str(args.input),
+            "format": "genie-xml",
+            "source_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            "unit": _sat_unit_from_scale(doc.unit_scale_m),
+            "sat_unit_scale_m": doc.sat_unit_scale_m,
+            "sat_entities": len(doc.sat.entities),
+            "structures": len(doc.structures),
+            "materials": len(doc.materials),
+            "sections": len(doc.sections),
+            "thicknesses": len(doc.thicknesses),
             "diagnostics": [],
         }
     elif suffix in (".step", ".stp", ".iges", ".igs", ".brep"):

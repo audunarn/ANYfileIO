@@ -653,8 +653,7 @@ def _emit_beam_offsets(bel: ET.Element, meta: Mapping[str, Any]) -> None:
             ET.SubElement(eccs_el, "eccentricity", {"end": "2", **_vec3_attrs(ecc_end)})
 
 
-def write_genie_concept(
-    path: str | Path,
+def _serialize_genie_concept_bytes(
     geometry: object,
     *,
     thicknesses: dict[str, float] | None = None,
@@ -662,8 +661,8 @@ def write_genie_concept(
     materials: Mapping[str, Any] | None = None,
     default_material: str = "Steel",
     cancellation=None,
-) -> Path:
-    """Export an ANYgeometry model as a GeniE Concept XML document with embedded ACIS 2000 SAT."""
+) -> tuple[bytes, list[tuple[str, int, str, int]]]:
+    """Serialize an ANYgeometry model as GeniE Concept XML bytes plus structure provenance."""
     from .sat_import import _SAT_UNIT_M, serialize_sat_bytes
 
     try:
@@ -730,7 +729,7 @@ def write_genie_concept(
 
     curved_surfaces = (surfaces_mod.Cylinder, surfaces_mod.Cone, nurbs_mod.NurbsSurface)
 
-    plate_specs: list[tuple[str, str, str, str, tuple[str, ...], Mapping[str, Any]]] = []
+    plate_specs: list[tuple[str, str, str, str, tuple[str, ...], Mapping[str, Any], tuple[str, int, str]]] = []
     for sid in sorted(geometry.sheets):
         sheet = geometry.sheets[sid]
         fids = [geometry.face_uses[u].face_id for u in sheet.face_use_ids]
@@ -746,7 +745,8 @@ def write_genie_concept(
         th_ref = ensure_thickness_ref(first_meta)
         is_curved = any(isinstance(geometry.faces[fid].surface, curved_surfaces) for fid in fids)
         kind = "curved_shell" if is_curved else "flat_plate"
-        plate_specs.append((sheet.name or f"Plate_{sid}", kind, mat, th_ref, tuple(name_face(fid) for fid in fids), first_meta))
+        prov_ref = ("face", fids[0], "face") if len(fids) == 1 else ("sheet", sid, "sheet")
+        plate_specs.append((sheet.name or f"Plate_{sid}", kind, mat, th_ref, tuple(name_face(fid) for fid in fids), first_meta, prov_ref))
 
     for fid in sorted(geometry.faces):
         if fid in used_faces:
@@ -760,9 +760,9 @@ def write_genie_concept(
         ensure_material(mat, meta)
         th_ref = ensure_thickness_ref(meta)
         kind = "curved_shell" if isinstance(face.surface, curved_surfaces) else "flat_plate"
-        plate_specs.append((str(meta.get("genie_name") or f"Plate_{fid}"), kind, mat, th_ref, (name_face(fid),), meta))
+        plate_specs.append((str(meta.get("genie_name") or f"Plate_{fid}"), kind, mat, th_ref, (name_face(fid),), meta, ("face", fid, "face")))
 
-    beam_specs: list[tuple[str, str, str, str, list[tuple[str, str, tuple[float, float, float], tuple[float, float, float], str | None, str | None]], Mapping[str, Any]]] = []
+    beam_specs: list[tuple[str, str, str, str, list[tuple[str, str, tuple[float, float, float], tuple[float, float, float], str | None, str | None]], Mapping[str, Any], tuple[str, int, str]]] = []
     for mid in sorted(geometry.members):
         member = geometry.members[mid]
         eids = [geometry.member_edge_uses[u].edge_id for u in member.edge_use_ids]
@@ -789,7 +789,7 @@ def write_genie_concept(
                 if smeta.get("material"):
                     seg_mat = str(smeta["material"])
             seg_list.append((seg_tag, name_edge(eid), p0, p1, seg_sec, seg_mat))
-        beam_specs.append((member.name or f"Beam_{mid}", kind, mat, sec_ref, seg_list, mmeta))
+        beam_specs.append((member.name or f"Beam_{mid}", kind, mat, sec_ref, seg_list, mmeta, ("member", mid, "member")))
 
     for eid in sorted(geometry.edges):
         if eid in used_edges:
@@ -801,7 +801,7 @@ def write_genie_concept(
         seg_tag = "straight_segment" if is_straight else "curved_segment"
         p0 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.start))
         p1 = tuple(float(c) * unit_scale for c in geometry.vertex_position(edge.end))
-        beam_specs.append((f"Beam_edge_{eid}", kind, default_material, sec_ref, [(seg_tag, name_edge(eid), p0, p1, sec_ref, default_material)], {}))
+        beam_specs.append((f"Beam_edge_{eid}", kind, default_material, sec_ref, [(seg_tag, name_edge(eid), p0, p1, sec_ref, default_material)], {}, ("edge", eid, "member")))
 
     sat_bytes, _, _, _ = serialize_sat_bytes(
         geometry,
@@ -846,7 +846,11 @@ def write_genie_concept(
         _emit_section_child(sel, sspec)
 
     structs_el = ET.SubElement(domain_el, "structures")
-    for pname, pkind, mat, th_ref, face_refs, pmeta in plate_specs:
+    provenance: list[tuple[str, int, str, int]] = []
+    struct_idx = 0
+    for pname, pkind, mat, th_ref, face_refs, pmeta, (src_kind, src_id, cad_kind) in plate_specs:
+        struct_idx += 1
+        provenance.append((src_kind, src_id, cad_kind, struct_idx))
         wrap = ET.SubElement(structs_el, "structure")
         pel = ET.SubElement(wrap, pkind, {"name": pname, "thickness_ref": th_ref, "material_ref": mat})
         _emit_local_system(pel, pmeta, include_curve_orientation=False)
@@ -854,7 +858,9 @@ def write_genie_concept(
         for fref in face_refs:
             ET.SubElement(geom_el, "face", {"face_ref": fref})
 
-    for bname, bkind, _mat, _sec_ref, seg_list, bmeta in beam_specs:
+    for bname, bkind, _mat, _sec_ref, seg_list, bmeta, (src_kind, src_id, cad_kind) in beam_specs:
+        struct_idx += 1
+        provenance.append((src_kind, src_id, cad_kind, struct_idx))
         wrap = ET.SubElement(structs_el, "structure")
         bel = ET.SubElement(wrap, bkind, {"name": bname})
         _emit_local_system(bel, bmeta, include_curve_orientation=True)
@@ -877,7 +883,28 @@ def write_genie_concept(
         seg = ET.SubElement(sat_seq, "cdata_segment")
         seg.text = base64.b64encode(zip_bytes[pos:pos + chunk_size]).decode("ascii")
 
-    xml_payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True), provenance
+
+
+def write_genie_concept(
+    path: str | Path,
+    geometry: object,
+    *,
+    thicknesses: dict[str, float] | None = None,
+    sections: Mapping[str, Any] | None = None,
+    materials: Mapping[str, Any] | None = None,
+    default_material: str = "Steel",
+    cancellation=None,
+) -> Path:
+    """Export an ANYgeometry model as a GeniE Concept XML document with embedded ACIS 2000 SAT."""
+    xml_payload, _ = _serialize_genie_concept_bytes(
+        geometry,
+        thicknesses=thicknesses,
+        sections=sections,
+        materials=materials,
+        default_material=default_material,
+        cancellation=cancellation,
+    )
     destination = Path(path)
     temporary: Path | None = None
     temporary_identity: tuple[int, int] | None = None

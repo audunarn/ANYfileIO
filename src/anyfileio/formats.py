@@ -60,6 +60,11 @@ def _read_geometry(path: Path, **options: Any) -> Any:
     return read_geometry(path, **options)
 
 
+def _read_genie_xml(path: Path, **options: Any) -> Any:
+    from .genie_sat import read_genie_concept
+    return read_genie_concept(path, **options)
+
+
 READERS: Mapping[str, Tuple[Callable[..., Any], str]] = {
     ".anygeometry.json": (_read_geometry, "ANYgeometry editable geometry document"),
     ".anygeometry.json.gz": (_read_geometry, "Compressed ANYgeometry editable geometry document"),
@@ -68,6 +73,8 @@ READERS: Mapping[str, Tuple[Callable[..., Any], str]] = {
     ".frd": (_read_frd, "CalculiX FRD results"),
     ".dat": (_read_dat, "CalculiX DAT results"),
     ".inp": (_read_inp, "CalculiX input deck summary"),
+    ".sat": (_read_geometry, "ACIS SAT editable geometry document"),
+    ".xml": (_read_genie_xml, "DNV GeniE concept XML model"),
 }
 
 _BUILTIN_FORMATS = (
@@ -77,6 +84,8 @@ _BUILTIN_FORMATS = (
     FormatDescriptor("calculix-frd", (".frd",), "finite_element_results", frozenset({"read", "inspect"})),
     FormatDescriptor("calculix-inp", (".inp",), "finite_element_model", frozenset({"read", "inspect"})),
     FormatDescriptor("sesam-sif", (".sif",), "finite_element_results", frozenset({"read", "inspect"})),
+    FormatDescriptor("sat", (".sat",), "editable_geometry", frozenset({"read", "write", "inspect"})),
+    FormatDescriptor("genie-xml", (".xml",), "structural_concept_model", frozenset({"read", "write", "inspect"})),
 )
 _CAD_INSTALL_HINT = (
     "native CAD operations are not included in the ANYfileio 0.3.4 PyPI release; "
@@ -147,12 +156,19 @@ def _has_capability(descriptor: FormatDescriptor, capabilities: Any) -> bool:
 def available_formats() -> tuple[FormatDescriptor, ...]:
     """Formats usable from built-ins or an already-ready CAD provider."""
 
+    from dataclasses import replace
     from importlib.util import find_spec
-    builtin = tuple(item for item in _BUILTIN_FORMATS if item.name != "anygeometry" or find_spec("anygeometry") is not None)
+    has_owner = find_spec("anygeometry") is not None
+    builtin = tuple(
+        replace(item, capabilities=item.capabilities - {"write"})
+        if (item.name == "genie-xml" and not has_owner)
+        else item
+        for item in _BUILTIN_FORMATS
+        if item.name not in {"anygeometry", "sat"} or has_owner
+    )
     status = backend_status()
     if status.state != "ready" or status.capabilities is None:
         return tuple(sorted(builtin, key=lambda item: item.name))
-    from dataclasses import replace
     candidates = tuple(
         replace(item, capabilities=item.capabilities - {"assembly"})
         if not status.capabilities.assembly else item for item in _CAD_FORMATS

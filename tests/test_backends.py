@@ -323,9 +323,11 @@ def test_supported_suffixes_include_core_known_cad_suffixes() -> None:
         ".iges",
         ".igs",
         ".inp",
+        ".sat",
         ".sif",
         ".step",
         ".stp",
+        ".xml",
     )
 
 
