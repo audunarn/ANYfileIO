@@ -37,6 +37,16 @@ class SatImportCancelled(SatImportError):
     code = 'sat.cancelled'
 
 
+def _ellipse_piece_count(sweep: float) -> int:
+    """Quarter-turn pieces for an elliptic chart, ignoring last-bit sweep rounding.
+
+    A 90-degree arc that went through another kernel can come back a few ULP
+    above pi/2; a bare ceil would then split it into a spurious extra edge.
+    """
+    ratio = abs(float(sweep)) / (math.pi / 2)
+    return max(1, math.ceil(ratio - 1e-9 * max(1.0, ratio)))
+
+
 def _check_cancelled(cancelled, diagnostics=()):
     if cancelled is not None and cancelled():
         raise SatImportCancelled('SAT import cancelled', diagnostics)
@@ -968,7 +978,7 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                 prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
             elif part['kind'] == 'ellipse':
                 # Split ellipse charts into open native edges.
-                count = max(1, math.ceil(abs(part['sweep']) / (math.pi / 2)))
+                count = _ellipse_piece_count(part['sweep'])
                 for i in range(count):
                     curve = EllipticArc(tuple(part['center']), tuple(part['u']), tuple(part['v']), part['start'] + part['sweep'] * i / count, part['sweep'] / count)
                     prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))

@@ -127,7 +127,8 @@ def _sat_model_edge(model, sat_edge_id: int, part_list: list[dict[str, Any]], st
                 raise GenieSatError(f"SAT edge {sat_edge_id}: endpoint gap {gap} exceeds {accuracy}")
             made.append(model.add_curve(previous, following, curve))
         elif kind == "ellipse":
-            count = max(1, math.ceil(abs(part["sweep"]) / (math.pi / 2)))
+            from .sat_import import _ellipse_piece_count
+            count = _ellipse_piece_count(part["sweep"])
             for j in range(count):
                 seg_last = last and (j == count - 1)
                 curve = EllipticArc(tuple(part["center"]), tuple(part["u"]), tuple(part["v"]), part["start"] + part["sweep"] * j / count, part["sweep"] / count)
@@ -188,6 +189,7 @@ def reconstruct_genie_geometry(document: GenieConceptDocument, names: list[str] 
 
     from .sat_import import (
         _builtin,
+        _ellipse_piece_count,
         _inject_face_holes,
         _make_nurbs_pcurve,
         _nurbs_surface_uv,
@@ -263,7 +265,7 @@ def reconstruct_genie_geometry(document: GenieConceptDocument, names: list[str] 
                 c = NurbsCurve(part["degree"], tuple(part["knots"]), tuple(map(tuple, part["controls"])), tuple(part["weights"]), tuple(part["domain"]))
                 evaluators.append((c.evaluate, np.asarray(c.evaluate(0.0), dtype=float), np.asarray(c.evaluate(1.0), dtype=float)))
             elif kind == "ellipse":
-                count = max(1, math.ceil(abs(part["sweep"]) / (math.pi / 2)))
+                count = _ellipse_piece_count(part["sweep"])
                 for j in range(count):
                     c = EllipticArc(tuple(part["center"]), tuple(part["u"]), tuple(part["v"]), part["start"] + part["sweep"] * j / count, part["sweep"] / count)
                     evaluators.append((c.evaluate, np.asarray(c.evaluate(0.0), dtype=float), np.asarray(c.evaluate(1.0), dtype=float)))

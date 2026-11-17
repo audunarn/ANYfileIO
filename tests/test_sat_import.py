@@ -810,3 +810,17 @@ def test_cone_sphere_torus_and_spline_surface_sat_without_freecad(tmp_path):
     assert len(nm2.faces) == 1 and len(nm2.faces[1].holes) == 1
     assert isinstance(nm2.faces[1].surface, NurbsSurface)
     assert nm2.faces[1].surface.evaluate(0.5, 0.5) == pytest.approx(ns.evaluate(0.5, 0.5), abs=1e-12)
+
+
+def test_ellipse_piece_count_ignores_last_bit_sweep_rounding():
+    import math
+    from anyfileio.sat_import import _ellipse_piece_count
+    quarter = math.pi / 2
+    # A quarter arc reread from STEP/IGES can come back one ULP above pi/2.
+    assert _ellipse_piece_count(math.nextafter(quarter, math.inf)) == 1
+    assert _ellipse_piece_count(1.5707963267948968) == 1
+    assert _ellipse_piece_count(-quarter) == 1
+    assert _ellipse_piece_count(quarter * 1.001) == 2
+    assert _ellipse_piece_count(math.pi) == 2
+    assert _ellipse_piece_count(math.tau) == 4
+    assert _ellipse_piece_count(1e-3) == 1
