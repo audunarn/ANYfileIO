@@ -907,6 +907,18 @@ def _inject_face_holes(model, face_holes: dict[int, list[list]], *, to_dict, fro
     return from_dict(payload)
 
 
+def _exactly_straight_nurbs(curve) -> bool:
+    """A 3D degree-1 NURBS with two distinct controls, equal weights (or none) and its full forward knot domain.
+
+    Its weights cancel and its basis is linear, so it is exactly the segment
+    between its two control points, which are its exact ends.
+    """
+    return (curve.degree == 1 and len(curve.controls) == 2 and curve.dimension == 3
+            and (curve.weights is None or curve.weights[0] == curve.weights[1])
+            and tuple(curve.domain) == (curve.knots[1], curve.knots[2])
+            and tuple(curve.controls[0]) != tuple(curve.controls[1]))
+
+
 def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None, relocation_tolerance=None, approximate_tolerance=None):
     import numpy as np
     # ANYgeometry is an optional runtime provider for native SAT geometry (like OrcFxAPI for OrcaWave).
@@ -953,6 +965,11 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
     incident = {}
     max_declared_fit = 0.0
     fit_allowance = max(source_accuracy, approximate_tolerance or 0.0)
+    straight_ends = {}             # vertex -> exact end of each incident first/last piece (None: not straight)
+    straight_nurbs_keys = set()    # (edge, piece index) of exactly straight NURBS stored as line pieces
+    straight_moved = set()         # vertices moved exactly onto agreeing straight ends
+    straight_canonicalized = 0
+    straight_max_deviation = 0.0
     for number, entity in index.entities.items():
         _check_cancelled(cancelled)
         if entity.kind != 'edge':
@@ -975,7 +992,12 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     raise SatImportError(f'edge {number}: approximate curve cache declared to {fit} m exceeds {"the caller opt-in" if approximate_tolerance else "the source resolution"} {fit_allowance}{hint}')
                 max_declared_fit = max(max_declared_fit, fit)
                 curve = NurbsCurve(part['degree'], tuple(part['knots']), tuple(map(tuple, part['controls'])), tuple(part['weights']), tuple(part['domain']))
-                prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
+                if relocation_tolerance is not None and _exactly_straight_nurbs(curve):
+                    # Opt-in: an exactly straight NURBS is the segment of its exact control ends (a line piece).
+                    straight_nurbs_keys.add((number, len(prepared)))
+                    prepared.append((None, tuple(map(float, curve.controls[0])), tuple(map(float, curve.controls[1]))))
+                else:
+                    prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
             elif part['kind'] == 'ellipse':
                 # Split ellipse charts into open native edges.
                 count = _ellipse_piece_count(part['sweep'])
@@ -987,6 +1009,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
         prepared_edges[number] = (start_number, end_number, prepared)
         incident.setdefault(start_number, []).append(np.asarray(prepared[0][1], dtype=float))
         incident.setdefault(end_number, []).append(np.asarray(prepared[-1][2], dtype=float))
+        straight_ends.setdefault(start_number, []).append(tuple(map(float, prepared[0][1])) if prepared[0][0] is None else None)
+        straight_ends.setdefault(end_number, []).append(tuple(map(float, prepared[-1][2])) if prepared[-1][0] is None else None)
     # Opt-in only: move a vertex onto its edges' agreeing curve ends; tolerances are unchanged.
     relocated = {}
     if relocation_tolerance is not None:
@@ -995,6 +1019,18 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
             if position is None:
                 continue
             position = np.asarray(position, dtype=float)
+            ends = straight_ends.get(vertex, ())
+            if ends and None not in ends and len(set(ends)) == 1:
+                # Only straight pieces meet here and their exact ends agree: the vertex goes exactly onto
+                # them (their Straight edges are then the source lines), when every end stays within resolution.
+                target = np.asarray(ends[0], dtype=float)
+                distance = float(np.linalg.norm(target - position))
+                if distance > 0 and all(float(np.linalg.norm(q - target)) <= source_accuracy for q in points):
+                    if distance > relocation_tolerance:
+                        raise SatImportError(f'vertex {vertex}: move {distance} onto its straight edge ends exceeds the vertex_relocation_tolerance_m opt-in {relocation_tolerance}')
+                    relocated[vertex] = (ends[0], distance)
+                    straight_moved.add(vertex)
+                    continue
             if max(float(np.linalg.norm(q - position)) for q in points) <= source_accuracy:
                 continue
             if max(float(np.linalg.norm(a - b)) for a in points for b in points) > source_accuracy:
@@ -1106,7 +1142,14 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     raise SatImportError(f'edge {number}: straight piece endpoints disagree with topology')
                 exact_endpoints = np.array_equal(model.vertex_position(previous), a) and np.array_equal(model.vertex_position(following), b)
                 try:
-                    if exact_endpoints:
+                    if exact_endpoints or relocation_tolerance is not None:
+                        if (not exact_endpoints or (number, i) in straight_nurbs_keys
+                                or (i == 0 and start_number in straight_moved) or (last and end_number in straight_moved)):
+                            # Opt-in: a Straight edge replaces what would be a NURBS line: exactly, after a move
+                            # onto agreeing ends, or between the kept vertices, deviating from the source line by
+                            # at most its end gaps (checked within the source resolution above).
+                            straight_canonicalized += 1
+                            straight_max_deviation = max(straight_max_deviation, *(distance for distance, _ in ends))
                         made.append(model.add_line(previous, following))
                     else:
                         # Preserve the source line instead of snapping it to topology.
@@ -1179,7 +1222,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
             if approximate_tolerance is not None:
                 metadata.update(source_approximate_curve_opt_in_m=approximate_tolerance)
         if relocation_tolerance is not None:
-            metadata.update(source_vertex_relocation_opt_in_m=relocation_tolerance, source_vertex_relocations_m={str(k): v[1] for k, v in sorted(relocated.items())})
+            metadata.update(source_vertex_relocation_opt_in_m=relocation_tolerance, source_vertex_relocations_m={str(k): v[1] for k, v in sorted(relocated.items())},
+                            source_straight_canonicalized_edges=straight_canonicalized, source_straight_max_deviation_m=straight_max_deviation)
         if vertex_tolerance:
             metadata.update(source_tolerant_vertices_m={str(k): v for k, v in sorted(vertex_tolerance.items())}, source_max_tolerant_vertex_gap_m=max_tolerant_gap)
         model.set_face_metadata(identifier, metadata)
@@ -1194,7 +1238,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
     if approximate_tolerance is not None or max_declared_fit > 0:
         notes += (f'Approximate curve caches: largest declared fit tolerance {max_declared_fit:.17g} m' + (f' (caller opt-in {approximate_tolerance:.17g} m).' if approximate_tolerance is not None else '.'),)
     if relocation_tolerance is not None:
-        notes += (f'Vertex relocation opt-in {relocation_tolerance:.17g} m: {len(relocated)} vertices moved onto agreeing edge ends; largest move {max((v[1] for v in relocated.values()), default=0.0):.17g} m.',)
+        notes += (f'Vertex relocation opt-in {relocation_tolerance:.17g} m: {len(relocated)} vertices moved onto agreeing edge ends; largest move {max((v[1] for v in relocated.values()), default=0.0):.17g} m.',
+                  f'Straight canonicalization: {straight_canonicalized} straight pieces stored as Straight edges between moved or kept vertices ({len(straight_nurbs_keys)} pieces from exactly straight NURBS); largest deviation from the source lines {straight_max_deviation:.17g} m.')
     if vertex_tolerance:
         notes += (f'Tolerant source vertices {len(vertex_tolerance)}; largest declared tolerance {max(vertex_tolerance.values()):.17g} m; maximum endpoint gap at tolerant vertices {max_tolerant_gap:.17g} m.',)
     return SatImportResult(model, digest, scale, notes, vertices, edges, faces)
