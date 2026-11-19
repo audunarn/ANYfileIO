@@ -97,3 +97,76 @@ def test_only_exactly_straight_nurbs_qualify():
     assert not _exactly_straight_nurbs(nurbs_circular_arc((0., 0., 0.), (1., 0., 0.), (0., 1., 0.), 1., 0.,
                                                           math.pi / 2))                          # curved
     assert not _exactly_straight_nurbs(NurbsCurve(1, (0., 0., 1., 1.), (line[0], line[0])))      # degenerate
+
+
+def test_count_is_against_the_previous_opt_in_result(tmp_path):
+    # Codex r1 #3: vertex 42 off by 1.5e-6; the previous opt-in already moved it onto the agreeing line ends.
+    path = tmp_path / 'gap.sat'
+    path.write_bytes(_gapped_rectangle(1.5e-6))
+    result = read_sat(path, vertex_relocation_tolerance_m=2e-6)
+    metadata = result.geometry.faces[1].metadata
+    assert set(_curve_types(result).values()) == {'Straight'}
+    assert metadata['source_straight_canonicalized_edges'] == 0
+    assert dict(metadata['source_vertex_relocations_m']) == {'42': pytest.approx(1.5e-6, rel=1e-6)}
+
+
+def _cache_line_rectangle(fit):
+    """Edge 30 (0,0,0)-(2,0,0) as a straight degree-1 intcurve cache declared to ``fit``."""
+    data = rectangle()
+    old = b'-60 straight-curve $-1 -1 -1 $-1 0 0 0 2 0 0 I I #'
+    assert data.count(old) == 1
+    new = (f'-60 intcurve-curve $-1 -1 -1 $-1 forward {{ int_int_cur full nubs 1 open 2 0 1 1 1 '
+           f'0 0 0 2 0 0 {fit!r} F 0 1 nullbs nullbs nullbs nullbs 0 1 I I }} I I #').encode()
+    return data.replace(old, new)
+
+
+def test_straight_cache_becomes_the_same_segment_and_its_fit_stays_reported(tmp_path):
+    # Codex r1 #2 (decision): the import already admits and stores this cache as the edge; Straight is the same segment.
+    path = tmp_path / 'cache.sat'
+    path.write_bytes(_cache_line_rectangle(5e-7))
+    plain = read_sat(path)
+    assert _curve_types(plain)[30] == 'NurbsCurve'
+    result = read_sat(path, vertex_relocation_tolerance_m=2e-6)
+    assert _curve_types(result)[30] == 'Straight'
+    metadata = result.geometry.faces[1].metadata
+    assert metadata['source_straight_canonicalized_edges'] == 1
+    assert metadata['source_straight_max_deviation_m'] == 0.0
+    assert metadata['source_max_declared_curve_fit_m'] == 5e-7
+    assert any('1 of them exactly straight NURBS' in note for note in result.diagnostics)
+
+
+def test_nurbs_surface_faces_keep_their_route_under_the_opt_in(tmp_path):
+    # Codex r1 #1: edges on NURBS-surface faces take no part in straight canonicalization or exact moves.
+    from anygeometry import GeometryModel
+    from anygeometry.nurbs import CurveOnSurface, NurbsCurve, NurbsSurface
+    from anyfileio.sat_import import write_sat
+    surface = NurbsSurface(1, 2, (0, 0, 1, 1), (0, 0, 0, 1, 1, 1),
+                           (((0, 0, 0), (0, 2, .5), (0, 4, 0)), ((4, 0, 0), (4, 2, 1.5), (4, 4, 0))),
+                           ((1., .9, 1.), (1., 1.1, 1.)))
+    model = GeometryModel()
+    uv = [(0., 0.), (1., 0.), (1., 1.), (0., 1.)]
+    points = [model.add_point(*surface.evaluate(*p)) for p in uv]
+    edges = [model.add_curve(points[i], points[(i + 1) % 4],
+                             CurveOnSurface(surface, NurbsCurve(1, (0, 0, 1, 1), (uv[i], uv[(i + 1) % 4]))))
+             for i in range(4)]
+    model.add_face(edges, surface=surface)
+    path = tmp_path / 'spline.sat'
+    write_sat(path, model)
+    kwargs = dict(freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    plain, opted = read_sat(path, **kwargs), read_sat(path, vertex_relocation_tolerance_m=2e-6, **kwargs)
+    assert _curve_types(opted) == _curve_types(plain) and set(_curve_types(opted).values()) == {'CurveOnSurface'}
+    assert [tuple(opted.geometry.vertex_position(v)) for v in sorted(opted.geometry.vertices)] == \
+        [tuple(plain.geometry.vertex_position(v)) for v in sorted(plain.geometry.vertices)]
+    assert opted.geometry.faces[1].metadata['source_straight_canonicalized_edges'] == 0
+
+
+def test_signed_zero_ends_are_the_same_point(tmp_path):
+    # Codex r1 #4 (decision): exact agreement is numeric; -0.0 and 0.0 are one point, the move stays exact.
+    data = _gapped_rectangle(5e-7)
+    old = b'-61 straight-curve $-1 -1 -1 $-1 2 0 0 0 1 0'
+    assert data.count(old) == 1
+    path = tmp_path / 'zero.sat'
+    path.write_bytes(data.replace(old, b'-61 straight-curve $-1 -1 -1 $-1 2 0 -0 0 1 -0'))
+    result = read_sat(path, vertex_relocation_tolerance_m=2e-6)
+    assert tuple(result.geometry.vertex_position(result.source_vertex_map[42])) == (2.0, 1.0, 0.0)
+    assert set(_curve_types(result).values()) == {'Straight'}
