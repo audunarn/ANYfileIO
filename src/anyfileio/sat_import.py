@@ -1107,8 +1107,10 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                 # when every end stays within resolution.
                 target = np.asarray(ends[0], dtype=float)
                 distance = float(np.linalg.norm(target - position))
-                if distance > 0 and all(float(np.linalg.norm(q - target)) <= source_accuracy for q in points):
-                    if distance > relocation_tolerance:
+                if tuple(target) != tuple(position) and all(float(np.linalg.norm(q - target)) <= source_accuracy for q in points):
+                    from fractions import Fraction
+                    # the cap is decided exactly (a rounded norm can pass a move just over it)
+                    if sum((Fraction(float(t)) - Fraction(float(c))) ** 2 for t, c in zip(target, position)) > Fraction(relocation_tolerance) ** 2:
                         raise SatImportError(f'vertex {vertex}: move {distance} onto its straight edge ends exceeds the vertex_relocation_tolerance_m opt-in {relocation_tolerance}')
                     relocated[vertex] = (ends[0], distance)
                     straight_moved.add(vertex)
@@ -1202,7 +1204,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                                 # most its end gaps (checked within the source resolution above).
                                 straight_canonicalized += 1
                                 straight_from_nurbs += (number, i) in straight_nurbs_keys
-                                straight_max_deviation = max(straight_max_deviation, *(distance for distance, _ in ends))
+                            # every emitted Straight's end gaps bound its deviation from its piece as read
+                            straight_max_deviation = max(straight_max_deviation, *(distance for distance, _ in ends))
                         made.append(model.add_line(previous, following))
                     else:
                         # Preserve the source line instead of snapping it to topology.

@@ -204,3 +204,16 @@ def test_spline_face_vertices_do_not_move_by_the_straight_rule(tmp_path):
     for source in (40, 41):
         assert tuple(opted.geometry.vertex_position(opted.source_vertex_map[source])) == tuple(plain.geometry.vertex_position(plain.source_vertex_map[source]))
     assert _curve_types(opted) == _curve_types(plain)
+
+
+def test_move_cap_is_decided_exactly(tmp_path):
+    # Codex r3: the rounded norm of this move is just at the cap; the exact distance is over it.
+    data = rectangle()
+    old = b'-50 point $-1 -1 -1 $-1 0 0 0 #'
+    assert data.count(old) == 1
+    path = tmp_path / 'cap.sat'
+    path.write_bytes(data.replace(old, b'-50 point $-1 -1 -1 $-1 7e-08 1e-07 0 #'))
+    with pytest.raises(SatImportError, match='vertex 40.*exceeds the vertex_relocation_tolerance_m opt-in'):
+        read_sat(path, vertex_relocation_tolerance_m=1.22065556157337e-7)
+    result = read_sat(path, vertex_relocation_tolerance_m=1.3e-7)
+    assert tuple(result.geometry.vertex_position(result.source_vertex_map[40])) == (0.0, 0.0, 0.0)
