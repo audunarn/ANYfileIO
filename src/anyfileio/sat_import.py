@@ -967,6 +967,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
     fit_allowance = max(source_accuracy, approximate_tolerance or 0.0)
     straight_candidates = {}       # (edge, piece index) -> exact ends of an exactly straight admitted NURBS piece
     straight_nurbs_keys = set()    # candidates stored as line pieces (opt-in; not on NURBS-surface faces)
+    straight_cache_keys = set()    # candidates that are approximation caches (declared fit > 0)
+    original_pieces = {}           # (edge, piece index) -> the piece as read, before it became a line piece
     straight_moved = set()         # vertices moved exactly onto agreeing straight ends
     straight_canonicalized = 0
     straight_from_nurbs = 0
@@ -997,6 +999,8 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     # The admitted piece itself (exact, or a cache within its reported declared fit) is this
                     # segment; storing it as a line piece changes no geometry.
                     straight_candidates[(number, len(prepared))] = (tuple(map(float, curve.controls[0])), tuple(map(float, curve.controls[1])))
+                    if fit > 0:
+                        straight_cache_keys.add((number, len(prepared)))
                 prepared.append((curve, curve.evaluate(0.0), curve.evaluate(1.0)))
             elif part['kind'] == 'ellipse':
                 # Split ellipse charts into open native edges.
@@ -1081,6 +1085,7 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                 for index_, (curve, _a, _b) in enumerate(prepared):
                     if (number, index_) in straight_candidates:
                         # An exactly straight NURBS is the segment of its exact control ends: a line piece.
+                        original_pieces[(number, index_)] = prepared[index_]
                         prepared[index_] = (None, *straight_candidates[(number, index_)])
                         straight_nurbs_keys.add((number, index_))
             incident.setdefault(start_number, []).append(np.asarray(prepared[0][1], dtype=float))
@@ -1108,7 +1113,7 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     relocated[vertex] = (ends[0], distance)
                     straight_moved.add(vertex)
                     continue
-            moved = _mean_relocation(points, position)
+            moved = previous_relocated.get(vertex)    # otherwise exactly where the opt-in put it before
             if moved is not None:
                 relocated[vertex] = moved
     for source, point in payload['vertices'].items():
@@ -1176,16 +1181,21 @@ def _materialize(index, payload, digest, scale, source_accuracy, cancelled=None,
                     raise SatImportError(f'edge {number}: straight piece endpoints disagree with topology')
                 exact_endpoints = np.array_equal(model.vertex_position(previous), a) and np.array_equal(model.vertex_position(following), b)
                 try:
-                    if exact_endpoints or relocation_tolerance is not None:
+                    if (number, i) in straight_cache_keys and not exact_endpoints:
+                        # A straight approximation cache becomes Straight only exactly on its vertices; otherwise
+                        # the admitted cache is kept (its declared fit plus a segment change could exceed resolution).
+                        made.append(model.add_curve(previous, following, original_pieces[(number, i)][0]))
+                    elif exact_endpoints or relocation_tolerance is not None:
                         if relocation_tolerance is not None:
-                            def _before(source_vertex, native):
-                                # the vertex position the opt-in gave before straight canonicalization
+                            def _before(source_vertex, piece):
+                                # where the opt-in put this end before straight canonicalization: a source vertex's
+                                # previous placement, or an internal join at the piece's end as read
                                 if source_vertex is None:
-                                    return model.vertex_position(native)
+                                    return np.asarray(original_pieces.get((number, piece), prepared[piece])[2], dtype=float)
                                 moved = previous_relocated.get(source_vertex)
                                 return np.asarray(moved[0] if moved else payload['vertices'][str(source_vertex)], dtype=float)
-                            was_line = (np.array_equal(_before(start_number if i == 0 else None, previous), a)
-                                        and np.array_equal(_before(end_number if last else None, following), b))
+                            was_line = (np.array_equal(_before(start_number if i == 0 else None, i - 1), a)
+                                        and np.array_equal(_before(end_number if last else None, i), b))
                             if (number, i) in straight_nurbs_keys or not was_line:
                                 # Opt-in: a Straight edge replaces what was stored as a NURBS: exactly after a move
                                 # onto equal ends, or between the kept vertices, deviating from the source line by at

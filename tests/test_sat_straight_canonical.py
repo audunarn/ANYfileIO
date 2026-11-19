@@ -170,3 +170,37 @@ def test_signed_zero_ends_are_the_same_point(tmp_path):
     result = read_sat(path, vertex_relocation_tolerance_m=2e-6)
     assert tuple(result.geometry.vertex_position(result.source_vertex_map[42])) == (2.0, 1.0, 0.0)
     assert set(_curve_types(result).values()) == {'Straight'}
+
+
+def test_cache_off_its_vertices_keeps_the_admitted_cache(tmp_path):
+    # Codex r2 #2: a cache at y = 7.5e-7 between vertices at y = 0 would move by its gap on top of its declared fit.
+    data = _cache_line_rectangle(7.5e-7).replace(b'0 0 0 2 0 0 7.5e-07', b'0 7.5e-07 0 2 7.5e-07 0 7.5e-07')
+    path = tmp_path / 'cache-off.sat'
+    path.write_bytes(data)
+    plain, opted = read_sat(path), read_sat(path, vertex_relocation_tolerance_m=2e-6)
+    assert _curve_types(plain)[30] == _curve_types(opted)[30] == 'NurbsCurve'
+    edge = opted.geometry.edges[opted.source_edge_map[30][0]]
+    assert edge.curve.evaluate(.5)[1] == 7.5e-7
+
+
+_SPLINE_FACE = {
+    b'-12 ': b'-12 spline-surface $-1 -1 -1 $-1 forward { exact_spl_sur full nubs 2 2 open open none none 2 2 0 2 1 2 '
+             b'0 2 1 2 0 0 0 1 0 1e-7 2 0 0 0 0.5 0 1 0.5 3.0000001 2 0.5 0 0 1 0 1 1 1e-7 2 1 0 0 0 0 0 I I I I } I I #',
+    b'-60 ': b'-60 intcurve-curve $-1 -1 -1 $-1 forward { exact_int_cur full nubs 1 open 2 0 1 1 1 0 5.960464477539063e-08 0 '
+             b'2 5.960464477539063e-08 0 0 } I I #',
+    b'-61 ': b'-61 straight-curve $-1 -1 -1 $-1 2 5.960464477539063e-08 0 0 0.9999999403953552 0 I I #',
+    b'-63 ': b'-63 straight-curve $-1 -1 -1 $-1 0 1 0 0 -0.9999999403953552 0 I I #',
+}
+
+
+def test_spline_face_vertices_do_not_move_by_the_straight_rule(tmp_path):
+    # Codex r1 #1 reproducer (reconstructed by Codex in r2): 3c39732 moved vertices 40 and 41 of this spline face.
+    lines = rectangle().replace(b'1000 1e-6 1e-10', b'1000 1e-7 1e-10').split(bytes([10]))
+    lines = [next((new for key, new in _SPLINE_FACE.items() if line.startswith(key)), line) for line in lines]
+    path = tmp_path / 'spline-face.sat'
+    path.write_bytes(bytes([10]).join(lines))
+    kwargs = dict(freecad_python=tmp_path / 'missing.exe', inventor_loader=tmp_path / 'absent')
+    plain, opted = read_sat(path, **kwargs), read_sat(path, vertex_relocation_tolerance_m=2e-6, **kwargs)
+    for source in (40, 41):
+        assert tuple(opted.geometry.vertex_position(opted.source_vertex_map[source])) == tuple(plain.geometry.vertex_position(plain.source_vertex_map[source]))
+    assert _curve_types(opted) == _curve_types(plain)
