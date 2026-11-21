@@ -98,6 +98,67 @@ jobs:
           print(anyfileio.__version__)
       - run: python -m pytest
 
+  # Unreleased ANYgeometry capabilities (NURBS records, exact curves) are exercised here
+  # against one exact source commit, built pure-Python as in geometry-interchange.yml.
+  # The semantics job above stays on the published owners; moving this pin is a reviewed
+  # change, and a published release that carries these capabilities replaces it.
+  candidate-geometry:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.14"]
+    env:
+      ANYGEOMETRY_SHA: d71c5bc4db7867a1c6e0f135c7709200f2c5e607
+      ANYGEOMETRY_BUILD_NATIVE: '0'
+      ANYGEOMETRY_REQUIRE_NATIVE: '0'
+      ANYGEOMETRY_DISABLE_NATIVE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: core
+      - uses: actions/checkout@v4
+        with:
+          repository: audunarn/ANYgeometry
+          ref: ${{ env.ANYGEOMETRY_SHA }}
+          path: geometry
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip "setuptools>=77.0.3" wheel
+      - run: python -m pip wheel --no-deps --no-build-isolation ./geometry --wheel-dir wheels
+      - name: Install the candidate geometry with the published mesher and material owners
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess, sys
+          (wheel,) = Path('wheels').glob('*.whl')
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '--only-binary=:all:',
+                          f'ANYgeometry[planar] @ {wheel.resolve().as_uri()}',
+                          'ANYmesher==0.5.0', 'ANYmaterial==0.2.0'], check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '-e', './core[dev]'], check=True)
+          subprocess.run([sys.executable, '-m', 'pip', 'check'], check=True)
+      - name: Verify the candidate is the pinned source build
+        shell: python
+        run: |
+          import importlib, os, subprocess
+          from pathlib import Path
+          import sys
+          head = subprocess.run(['git', '-C', 'geometry', 'rev-parse', 'HEAD'], check=True,
+                                capture_output=True, text=True).stdout.strip()
+          assert head == os.environ['ANYGEOMETRY_SHA'], head
+          module = importlib.import_module('anygeometry')
+          assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+          importlib.import_module('anygeometry.nurbs')
+      - run: python -m pytest -o junit_family=legacy --junitxml=candidate-geometry.xml
+        working-directory: core
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-geometry-${{ matrix.os }}-${{ matrix.python-version }}
+          path: core/candidate-geometry.xml
+
   # The record and document layers must stay usable with nothing but numpy, so
   # that inspecting a file never drags in a mesh library.  This job also asserts
   # the async `anyio` can coexist: it is a transitive dependency of very common
