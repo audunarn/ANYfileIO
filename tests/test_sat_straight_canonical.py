@@ -49,6 +49,22 @@ def test_vertex_off_agreeing_straight_ends_moves_exactly_and_edges_become_straig
     assert any('straight' in note.lower() and '2 ' in note for note in result.diagnostics)
 
 
+def _split_top_edge(join, line_start):
+    """The rectangle as an adapter payload: edge 32 is a degree-1 NURBS to ``join`` plus a line from ``line_start``."""
+    from anyfileio.genie_sat import SatIndex
+    from anyfileio.sat_import import _materialize
+    corners = [(0., 0., 0.), (2., 0., 0.), (2., 1., 0.), (0., 1., 0.)]
+    edges = {str(30 + i): [dict(kind='line', start=corners[i], end=corners[(i + 1) % 4])] for i in range(4)}
+    edges['32'] = [dict(kind='nurbs', degree=1, knots=(0., 0., 1., 1.), controls=(corners[2], (join, 1., 0.)),
+                        weights=(1., 1.), domain=(0., 1.)),
+                   dict(kind='line', start=(line_start, 1., 0.), end=corners[3])]
+    payload = dict(vertices={str(40 + i): point for i, point in enumerate(corners)}, edges=edges,
+                   surfaces={'10': dict(kind='plane', origin=(0., 0., 0.), normal=(0., 0., 1.), u=(1., 0., 0.))})
+    result = _materialize(SatIndex(rectangle()), payload, 'test', 1.0, 1e-6, relocation_tolerance=2e-6)
+    assert set(type(edge.curve).__name__ for edge in result.geometry.edges.values()) == {'Straight'}
+    return result.geometry.faces[1].metadata
+
+
 def test_disagreeing_straight_ends_give_a_straight_within_resolution_and_report_it(tmp_path):
     from anygeometry.curves import Straight
     path = tmp_path / 'line.sat'
@@ -63,6 +79,11 @@ def test_disagreeing_straight_ends_give_a_straight_within_resolution_and_report_
     assert metadata['source_straight_canonicalized_edges'] == 1
     assert metadata['source_straight_max_deviation_m'] == pytest.approx(5e-7, rel=1e-6)
     assert metadata['source_straight_max_deviation_m'] <= metadata['source_absolute_resolution_m']
+
+    # Codex r3 (00ff4ff reported 0): the line after the NURBS starts at its evaluated end and shifts to its control.
+    split = _split_top_edge(0.2, 0.19999999999999996)
+    assert split['source_straight_canonicalized_edges'] == 1
+    assert split['source_straight_max_deviation_m'] == 0.2 - 0.19999999999999996 > 0
 
 
 def test_opt_in_off_is_unchanged(tmp_path):
@@ -108,6 +129,9 @@ def test_count_is_against_the_previous_opt_in_result(tmp_path):
     assert set(_curve_types(result).values()) == {'Straight'}
     assert metadata['source_straight_canonicalized_edges'] == 0
     assert dict(metadata['source_vertex_relocations_m']) == {'42': pytest.approx(1.5e-6, rel=1e-6)}
+
+    # Codex r2 #3 (162c601 counted 1): the old opt-in stored both pieces at this internal join as NURBS.
+    assert _split_top_edge(0.12345678, 0.12345678)['source_straight_canonicalized_edges'] == 2
 
 
 def _cache_line_rectangle(fit):
@@ -193,6 +217,35 @@ _SPLINE_FACE = {
 }
 
 
+def _spline_face_sharing_a_vertex_with_a_triangle():
+    """Codex r2 #1: vertex 40 of a spline face also ends an exactly straight NURBS of a planar triangle."""
+    data = rectangle().replace(b'1000 1e-6 1e-10', b'1000 1e-7 1e-10')
+    old = b'-50 point $-1 -1 -1 $-1 0 0 0 #'
+    assert data.count(old) == 1
+    data = data.replace(old, b'-50 point $-1 -1 -1 $-1 0 1.5e-07 0 #')
+    newline = bytes([10])
+    spline = _SPLINE_FACE[b'-12 '].replace(b' 3.0000001 ', b' 20.0000001 ')
+    lines = [spline if line.startswith(b'-12 ') else line for line in data.split(newline)]
+    triangle = """\
+-110 face $-1 -1 -1 $-1 $-1 $111 $-1 $-1 $112 forward double out F F #
+-111 loop $-1 -1 -1 $-1 $-1 $120 $110 unknown #
+-112 plane-surface $-1 -1 -1 $-1 0 0 0 0 0 1 1 0 0 forward_v I I I I #
+-120 coedge $-1 -1 -1 $-1 $121 $122 $-1 $130 forward $111 $-1 #
+-121 coedge $-1 -1 -1 $-1 $122 $120 $-1 $131 forward $111 $-1 #
+-122 coedge $-1 -1 -1 $-1 $120 $121 $-1 $132 forward $111 $-1 #
+-130 edge $-1 -1 -1 $-1 $40 0 $141 1 $120 $160 forward #
+-131 edge $-1 -1 -1 $-1 $141 0 $142 1 $121 $161 forward #
+-132 edge $-1 -1 -1 $-1 $142 0 $40 1 $122 $162 forward #
+-141 vertex $-1 -1 -1 $-1 $130 $151 #
+-142 vertex $-1 -1 -1 $-1 $131 $152 #
+-151 point $-1 -1 -1 $-1 -1 0 0 #
+-152 point $-1 -1 -1 $-1 0 -10000000000 0 #
+-160 straight-curve $-1 -1 -1 $-1 0 0 0 -1 0 0 I I #
+-161 straight-curve $-1 -1 -1 $-1 -1 0 0 1 -10000000000 0 I I #
+-162 intcurve-curve $-1 -1 -1 $-1 forward { exact_int_cur full nubs 1 open 2 0 1 1 1 0 -10000000000 0 0 7.5e-08 0 0 } I I #"""
+    return newline.join(lines[:-1] + triangle.encode().split(newline) + lines[-1:])
+
+
 def test_spline_face_vertices_do_not_move_by_the_straight_rule(tmp_path):
     # Codex r1 #1 reproducer (reconstructed by Codex in r2): 3c39732 moved vertices 40 and 41 of this spline face.
     lines = rectangle().replace(b'1000 1e-6 1e-10', b'1000 1e-7 1e-10').split(bytes([10]))
@@ -204,6 +257,13 @@ def test_spline_face_vertices_do_not_move_by_the_straight_rule(tmp_path):
     for source in (40, 41):
         assert tuple(opted.geometry.vertex_position(opted.source_vertex_map[source])) == tuple(plain.geometry.vertex_position(plain.source_vertex_map[source]))
     assert _curve_types(opted) == _curve_types(plain)
+
+    # Codex r2 #1 (162c601 gave y = 1.875e-8): the old opt-in placed the shared vertex on the evaluated ends' mean.
+    shared = tmp_path / 'spline-and-triangle.sat'
+    shared.write_bytes(_spline_face_sharing_a_vertex_with_a_triangle())
+    opted = read_sat(shared, vertex_relocation_tolerance_m=2e-6, **kwargs)
+    assert _curve_types(opted)[132] == 'Straight'
+    assert tuple(opted.geometry.vertex_position(opted.source_vertex_map[40])) == (0.0, 0.0, 0.0)
 
 
 def test_move_cap_is_decided_exactly(tmp_path):
